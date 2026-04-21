@@ -24,7 +24,7 @@ All LLM inference happens inside your local session. For Claude Pro/Max users th
 
 ## 0. Default configuration
 
-If the user didn't paste a YAML/JSON config before invoking you, use these defaults:
+If the user didn't paste a YAML/JSON config before invoking you AND they said "just defaults" during the interview (Step 0.5), use:
 
 \`\`\`yaml
 white:
@@ -42,11 +42,63 @@ black:
 max_turns: 60
 \`\`\`
 
-The user may have overridden any of these. Honor their overrides.
+## 0.5. Interview the user — do this BEFORE creating the game
+
+Take 30 seconds to learn what game the user wants. Ask all the questions below in one message as a numbered block. The user answers inline. If they reply "just defaults" or "skip" or similar, use Section 0 unchanged and move on.
+
+Your message to them should look like:
+
+> Before I start the game, a few quick choices (or reply "defaults" to skip):
+>
+> 1. **Negotiation strategy** — how do the agents decide each move?
+>    - \`auction\` (default) — highest-confidence proposal wins. Punchy, short turns.
+>    - \`democracy\` — one vote per agent, plurality wins.
+>    - \`monarchy\` — the King picks from teammates' proposals.
+>    - \`debate\` — N rounds of back-and-forth, then an auction.
+>    - \`consensus\` — keep debating until ≥75% agree (timeout → auction).
+>    - \`hierarchy\` — Queen > Rooks > Bishops > Knights > Pawns.
+>    - \`rotating\` — each turn, a different piece-group has sole authority.
+>    - \`anarchy\` — random proposal wins. Pure comedy.
+>
+> 2. **Personality preset** — the voice the agents speak in.
+>    - \`medieval_serious\` (default) — thy / forsooth, scheming bishops, gallant knights.
+>    - \`shakespearean_tragedy\` — iambic pentameter, melodramatic death speeches.
+>    - \`modern_office\` — Queen = CEO, pawns = interns, Slack-speak.
+>
+> 3. **Trash-talk intensity** — \`none\` / \`mild\` (default) / \`spicy\` / \`unhinged\`.
+>
+> 4. **Max turns** before we auto-end — default \`60\` (anything 20–300 works).
+>
+> 5. **Asymmetric?** — different strategy/personality for white vs. black is a feature. Pick this only if you want it; default = same on both sides.
+
+Parse the answers, build a \`config\` object of this shape:
+
+\`\`\`json
+{
+  "white": {
+    "topology": "grouped",
+    "personality_preset": "<preset>",
+    "negotiation_strategy": "<strategy>",
+    "trash_talk_intensity": "<intensity>",
+    "stockfish_mode": "off"
+  },
+  "black": { /* same shape */ },
+  "max_turns": 60
+}
+\`\`\`
+
+Rules when parsing:
+- Unrecognized strategy / preset names → tell the user the valid list and re-ask.
+- If they picked **asymmetric**, ask follow-up questions for each side; otherwise copy the same values to both.
+- If they gave a partial answer (only strategy, skipping personality), fill the rest from defaults without re-asking.
+- Read back the final resolved config to them in one line before creating the game:
+  > "Great — auction + medieval_serious + mild trash talk, 60 turns. Starting now."
+
+Only after the interview do you proceed to Section 1.
 
 ## 1. Create the game session
 
-Make one HTTP call:
+Once the interview from Section 0.5 has produced a final config, make one HTTP call:
 
 \`\`\`
 POST ${API}/games
