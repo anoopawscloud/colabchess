@@ -133,6 +133,37 @@ class TestCreateGame:
         assert resp["statusCode"] == 400, resp
 
 
+class TestModeField:
+    def test_default_mode_is_ai_vs_ai(self, ddb: None) -> None:
+        created = _invoke(_event("POST", "/games", body={}))["_json"]
+        gid = created["id"]
+        snap = _invoke(_event("GET", f"/games/{gid}", path_parameters={"id": gid}))
+        body = snap["_json"]
+        assert body["mode"] == "ai_vs_ai"
+        assert body["human_plays"] is None
+
+    def test_human_vs_ai_config_round_trips(self, ddb: None) -> None:
+        created = _invoke(
+            _event(
+                "POST",
+                "/games",
+                body={"config": {"mode": "human_vs_ai", "human_plays": "white"}},
+            )
+        )
+        assert created["statusCode"] == 201, created
+        gid = created["_json"]["id"]
+        snap = _invoke(_event("GET", f"/games/{gid}", path_parameters={"id": gid}))
+        body = snap["_json"]
+        assert body["mode"] == "human_vs_ai"
+        assert body["human_plays"] == "white"
+
+    def test_human_vs_ai_without_human_plays_rejected(self, ddb: None) -> None:
+        resp = _invoke(
+            _event("POST", "/games", body={"config": {"mode": "human_vs_ai"}})
+        )
+        assert resp["statusCode"] == 400, resp
+
+
 class TestSnapshot:
     def test_missing_game_returns_404(self, ddb: None) -> None:
         resp = _invoke(

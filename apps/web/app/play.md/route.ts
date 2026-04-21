@@ -27,6 +27,8 @@ All LLM inference happens inside your local session. For Claude Pro/Max users th
 If the user didn't paste a YAML/JSON config before invoking you, use these defaults:
 
 \`\`\`yaml
+mode: ai_vs_ai                    # or "human_vs_ai" (see Section 0.6)
+human_plays: null                 # "white" or "black" when mode == human_vs_ai
 white:
   topology: grouped               # 6 agents per side: pawns, knights, bishops, rooks, queen, king
   personality_preset: medieval_serious
@@ -43,6 +45,25 @@ max_turns: 60
 \`\`\`
 
 The user may have overridden any of these. Honor their overrides.
+
+## 0.6. Game mode — ask the user BEFORE game creation
+
+Do this first (or fold it into any other interview step you're running). Pick one:
+
+- **AI vs AI** (default) — both sides are piece-agents. You just watch.
+- **Human vs AI** — one side is a human move-by-move; the other side is piece-agents.
+
+If Human vs AI, also ask: "Do you play white or black?" The human moving white has classical first-move advantage; black is a reactive game.
+
+Record the choice into the config you POST in Section 1:
+
+\`\`\`json
+{"mode": "ai_vs_ai"}                                 // default
+{"mode": "human_vs_ai", "human_plays": "white"}     // human is white
+{"mode": "human_vs_ai", "human_plays": "black"}     // human is black
+\`\`\`
+
+The backend rejects \`mode: "human_vs_ai"\` without \`human_plays\` with a 400.
 
 ## 1. Create the game session
 
@@ -88,7 +109,27 @@ Repeat until the game has ended (status becomes \`checkmate\`, \`stalemate\`, \`
 GET ${API}/games/{id}
 \`\`\`
 
-Returns \`{fen, status, side_to_move, legal_moves, config, events, next_seq}\`. The \`side_to_move\` is \`"white"\` or \`"black"\`; \`legal_moves\` is the full UCI list for that side. **Use these directly. Do not compute them yourself.**
+Returns \`{fen, status, side_to_move, legal_moves, config, mode, human_plays, events, next_seq}\`. The \`side_to_move\` is \`"white"\` or \`"black"\`; \`legal_moves\` is the full UCI list for that side. \`mode\` is \`"ai_vs_ai"\` or \`"human_vs_ai"\`; \`human_plays\` is the side the human controls when mode is human_vs_ai. **Use these directly. Do not compute them yourself.**
+
+**3a.1. Branch: is this the human's turn?**
+
+If \`mode == "human_vs_ai"\` AND \`side_to_move == human_plays\`, skip the sub-agent dance entirely — the human plays this move. Handle it like this:
+
+1. POST a \`TURN_STARTED\` event: \`{"type":"TURN_STARTED","turn":N,"side":"white|black","player":"human"}\`.
+2. Ask the user in plain prose. Example message:
+   > **Turn N — your move.** You play {white|black}.
+   > Position (FEN): \`{fen}\`
+   > A few of your legal moves: \`{first-10 of legal_moves joined}\` ({legal_moves.length} total).
+   > What's your move? Paste UCI (e.g. \`e2e4\`) or SAN (\`e4\`, \`Nf3\`).
+3. Parse their answer:
+   - If UCI matches \`legal_moves\`, use it directly.
+   - If SAN, expand it by matching piece + destination against \`legal_moves\`. (Your own SAN→UCI conversion. Watch for disambiguation like \`Nbd2\`.)
+   - If neither matches, respond "That move isn't legal here. Legal options: {full list}. Try again." and re-prompt.
+4. Once you have a valid UCI: POST \`${API}/games/{id}/move\` with \`{"move": uci, "side": <side>, "turn": N}\`.
+5. Optionally POST a custom \`HUMAN_MOVE\` event with a snippet like \`"You played <san>."\` for the viewer feed.
+6. Skip steps 3b–3f for this turn. Go to 3g (reactions are optional here). Then continue the outer loop for the AI's turn.
+
+Only if it's NOT the human's turn, proceed to 3b.
 
 **3b. Bucket legal moves by piece-group**
 

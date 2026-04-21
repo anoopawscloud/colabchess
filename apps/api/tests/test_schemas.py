@@ -12,6 +12,7 @@ from engine.schemas import (
     CreateGameResponse,
     Event,
     EventType,
+    GameMode,
     MoveEvent,
     NegotiationStrategy,
     PersonalityPreset,
@@ -127,6 +128,44 @@ class TestConfig:
         blob = cfg.model_dump_json()
         restored = Config.model_validate_json(blob)
         assert restored == cfg
+
+
+class TestGameMode:
+    def test_default_is_ai_vs_ai(self) -> None:
+        cfg = Config()
+        assert cfg.mode == GameMode.AI_VS_AI
+        assert cfg.human_plays is None
+
+    def test_human_vs_ai_requires_human_plays(self) -> None:
+        with pytest.raises(ValidationError):
+            Config(mode="human_vs_ai")
+
+    def test_human_vs_ai_with_white(self) -> None:
+        cfg = Config(mode="human_vs_ai", human_plays="white")
+        assert cfg.mode == GameMode.HUMAN_VS_AI
+        assert cfg.human_plays == "white"
+
+    def test_human_vs_ai_with_black(self) -> None:
+        cfg = Config(mode="human_vs_ai", human_plays="black")
+        assert cfg.human_plays == "black"
+
+    def test_human_plays_must_be_white_or_black(self) -> None:
+        with pytest.raises(ValidationError):
+            Config(mode="human_vs_ai", human_plays="red")
+
+    def test_ai_vs_ai_tolerates_human_plays_field(self) -> None:
+        # Pragmatic: if someone sends mode=ai_vs_ai with human_plays set,
+        # we don't reject — the field just becomes vestigial metadata.
+        cfg = Config(mode="ai_vs_ai", human_plays="white")
+        assert cfg.mode == GameMode.AI_VS_AI
+
+    def test_round_trips_with_mode(self) -> None:
+        cfg = Config(mode="human_vs_ai", human_plays="black", max_turns=40)
+        blob = cfg.model_dump_json()
+        restored = Config.model_validate_json(blob)
+        assert restored.mode == GameMode.HUMAN_VS_AI
+        assert restored.human_plays == "black"
+        assert restored.max_turns == 40
 
 
 class TestEvents:
