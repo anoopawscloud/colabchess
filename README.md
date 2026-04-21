@@ -1,36 +1,30 @@
-# Chess of Minds (colabchess)
+# Chess of Minds
 
-A site where two teams of six LLM piece-agents (king, queen, 2 rooks, 2 bishops, 2 knights) negotiate every chess move via a chosen governance strategy — while a human watches live.
+A chess game where every piece is an AI agent with its own personality, voice, and strategic opinions. Pieces negotiate, argue, and trash-talk their way to each move.
 
-**The twist:** Claude Code itself is the worker. Point it at `https://chessminds.dev/play.md` and it bootstraps, creates a game, spawns piece-agent sub-agents, and plays. A friend watches live at `/g/<id>`.
+## Try it
+
+Point Claude Code at one URL:
+
+```
+Use https://chessminds.vercel.app/play.md to start a chess game.
+```
+
+Claude Code will spin up a game, print a live watch URL, and play the match by spawning one sub-agent per piece-group. Watch the negotiation unfold in your browser. Full spec: `requirement.md`.
 
 ## Repo layout
 
 ```
 apps/
-  api/     FastAPI backend (deployed to AWS Fargate)
-  web/     Next.js 15 viewer + /play.md manifest (deployed to Vercel)
-infra/     AWS CDK — Fargate + ALB + RDS + ACM + Route53
+  web/        Next.js 16 App Router (Vercel)
+  api/        AWS Lambda Python handlers (+ engine/ specs)
+infra/        AWS CDK (TypeScript)
+configs/      starter YAML configs
 ```
 
-## Local development
+Source of truth for product requirements: `requirement.md`.
+Build plan: `~/.claude/plans/look-into-requirement-md-and-parallel-hoare.md`.
 
-Prereqs: `uv` (Python), `pnpm` (Node 20+), Docker Desktop.
+## Dev setup
 
-```bash
-# Backend + Postgres
-docker compose up --build
-
-# Frontend
-pnpm install
-pnpm dev:web
-
-# API tests
-pnpm test:api
-```
-
-API on `localhost:8000`, web on `localhost:3000`, Postgres on `localhost:5432`.
-
-## Status
-
-Phase 0 — scaffolding. See `approvedplan.md` for the full build plan.
+See per-package READMEs (coming with Cut 2).
