@@ -89,6 +89,8 @@ function turnNumber(fen: string): number {
   return parseInt(parts[5] ?? "1", 10);
 }
 
+type ConnState = "connecting" | "live" | "error";
+
 export function GameViewer({
   initial,
   apiBase,
@@ -100,6 +102,8 @@ export function GameViewer({
   const [events, setEvents] = useState<BaseEvent[]>(initial.events ?? []);
   const [cursor, setCursor] = useState<number>(initial.next_seq ?? 0);
   const [polling, setPolling] = useState(true);
+  const [conn, setConn] = useState<ConnState>("connecting");
+  const [lastError, setLastError] = useState<string | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -107,29 +111,43 @@ export function GameViewer({
     let cancelled = false;
     const tick = async () => {
       try {
-        const r = await fetch(`${apiBase}/games/${initial.id}/events?since=${cursor}`, {
-          cache: "no-store",
-        });
-        if (!r.ok) return;
+        const r = await fetch(
+          `${apiBase}/games/${initial.id}/events?since=${cursor}`,
+          { cache: "no-store" },
+        );
+        if (!r.ok) {
+          throw new Error(`API ${r.status}`);
+        }
         const data = (await r.json()) as {
           events: BaseEvent[];
           next_seq: number;
           status: string;
         };
         if (cancelled) return;
+        setConn("live");
+        setLastError(null);
         if (data.events?.length) {
           setEvents((prev) => [...prev, ...data.events]);
           setCursor(data.next_seq);
           const lastMove = [...data.events].reverse().find((e) => e.type === "MOVE");
           if (lastMove && (lastMove as any).fen_after) {
-            setSnapshot((s) => ({ ...s, fen: (lastMove as any).fen_after, status: data.status }));
+            setSnapshot((s) => ({
+              ...s,
+              fen: (lastMove as any).fen_after,
+              status: data.status,
+            }));
           } else if (data.status !== snapshot.status) {
             setSnapshot((s) => ({ ...s, status: data.status }));
           }
           if (data.status && data.status !== "ongoing") setPolling(false);
         }
-      } catch {
-        /* transient — next tick will retry */
+      } catch (err) {
+        if (cancelled) return;
+        setConn("error");
+        const msg = err instanceof Error ? err.message : "unknown error";
+        setLastError(msg);
+        // eslint-disable-next-line no-console
+        console.error("[chessminds] poll failed:", err);
       }
     };
     const id = setInterval(tick, 1500);
@@ -163,6 +181,7 @@ export function GameViewer({
         </div>
         <div className="flex items-center gap-3 text-xs">
           <StatusPill status={snapshot.status} toMove={toMove} />
+          <ConnPill state={conn} error={lastError} />
           <span className="font-mono-block text-ink/50 dark:text-paper/50">
             turn {turn}
           </span>
@@ -213,6 +232,19 @@ export function GameViewer({
         </div>
       </section>
     </main>
+  );
+}
+
+function ConnPill({ state, error }: { state: ConnState; error: string | null }) {
+  if (state === "live") return null;
+  const bg = state === "error" ? "bg-rose-500/10 text-rose-600" : "bg-ink/10 text-ink/60 dark:bg-paper/10 dark:text-paper/60";
+  return (
+    <span
+      className={`font-mono-block ${bg} rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.14em]`}
+      title={error ?? ""}
+    >
+      {state === "error" ? `conn error` : "connecting"}
+    </span>
   );
 }
 

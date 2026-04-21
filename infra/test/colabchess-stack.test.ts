@@ -72,12 +72,13 @@ test("Lambda gets scoped read/write on the game table (not '*')", () => {
   }
 });
 
-test("CORS allows the Vercel origin", () => {
+test("CORS allows any origin (bearer-token-only, no credentials)", () => {
   const t = synth();
   t.hasResourceProperties("AWS::ApiGatewayV2::Api", {
     CorsConfiguration: {
-      AllowOrigins: Match.arrayWith(["https://chessminds.vercel.app"]),
+      AllowOrigins: Match.arrayWith(["*"]),
       AllowMethods: Match.arrayWith(["GET", "POST", "OPTIONS"]),
+      AllowHeaders: Match.arrayWith(["Authorization"]),
     },
   });
 });

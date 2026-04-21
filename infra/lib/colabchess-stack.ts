@@ -51,11 +51,9 @@ export class ChessMindsStack extends cdk.Stack {
     const httpApi = new apigw.HttpApi(this, "HttpApi", {
       apiName: "chessminds-api",
       corsPreflight: {
-        allowOrigins: [
-          "https://chessminds.vercel.app",
-          "http://localhost:3001",
-          "http://localhost:3000",
-        ],
+        // `*` is safe here: writes are bearer-token-gated (not cookie/session),
+        // so origin-based auth is not in play. No credentials are sent.
+        allowOrigins: ["*"],
         allowMethods: [
           apigw.CorsHttpMethod.GET,
           apigw.CorsHttpMethod.POST,
