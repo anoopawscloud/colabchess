@@ -14,6 +14,7 @@ import {
 import type { BaseEvent, Snapshot } from "@/lib/types";
 import { isMoveType, normalizeMove, normalizeProposal } from "@/lib/events";
 import { groupIntoTurns, auctionWinner, type Turn } from "@/lib/turns";
+import { NegotiationBars, type BarDatum } from "./NegotiationBars";
 
 type Side = "white" | "black";
 type ConnState = "connecting" | "live" | "error";
@@ -108,6 +109,7 @@ export function GameViewer({
   const [polling, setPolling] = useState(true);
   const [conn, setConn] = useState<ConnState>("connecting");
   const [lastError, setLastError] = useState<string | null>(null);
+  const [timelineOpen, setTimelineOpen] = useState(true);
   const timelineRef = useRef<HTMLDivElement>(null);
   const lastTurnCountRef = useRef(0);
 
@@ -180,15 +182,15 @@ export function GameViewer({
   }, [grouped.turns.length]);
 
   return (
-    <main className="mx-auto flex min-h-[100svh] max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-10">
-      <header className="flex items-center justify-between">
+    <main className="mx-auto flex min-h-[100svh] max-w-[1400px] flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4 text-sm">
           <span className="font-serif-display text-base">Chess of Minds</span>
           <span className="font-mono-block text-xs text-ink/40 dark:text-paper/40">
             {initial.id}
           </span>
         </div>
-        <div className="flex items-center gap-3 text-xs">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
           <StatusPill status={snapshot.status} toMove={toMove} />
           <ConnPill state={conn} error={lastError} />
           <span className="font-mono-block text-ink/50 dark:text-paper/50">
@@ -197,55 +199,125 @@ export function GameViewer({
         </div>
       </header>
 
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_minmax(0,560px)_1fr]">
-        <AgentColumn side="black" agents={agents.black} active={toMove === "black" && !ended} />
-        <div className="mx-auto w-full max-w-[560px]">
-          <div className="overflow-hidden rounded-xl border border-ink/10 shadow-sm dark:border-paper/10">
-            <Chessboard
-              options={{
-                position: snapshot.fen,
-                allowDragging: false,
-                boardOrientation: "white",
-                id: `cm-${initial.id}`,
-              }}
-            />
+      <div className="flex flex-col gap-5 lg:flex-row lg:gap-6">
+        <section className="flex-1 grid grid-cols-1 gap-4 md:grid-cols-[minmax(230px,260px)_minmax(0,1fr)_minmax(230px,260px)] md:gap-5">
+          <AgentColumn side="black" agents={agents.black} active={toMove === "black" && !ended} />
+          <div className="mx-auto flex w-full max-w-[600px] flex-col gap-3">
+            <div className="overflow-hidden rounded-xl border border-ink/10 shadow-sm dark:border-paper/10">
+              <Chessboard
+                options={{
+                  position: snapshot.fen,
+                  allowDragging: false,
+                  boardOrientation: "white",
+                  id: `cm-${initial.id}`,
+                }}
+              />
+            </div>
+            <span className="truncate text-center font-mono-block text-[11px] text-ink/50 dark:text-paper/50">
+              {snapshot.fen}
+            </span>
           </div>
-          <div className="mt-3 flex items-center justify-between text-xs text-ink/50 dark:text-paper/50">
-            <span className="font-mono-block truncate">{snapshot.fen}</span>
-          </div>
-        </div>
-        <AgentColumn side="white" agents={agents.white} active={toMove === "white" && !ended} />
-      </section>
+          <AgentColumn side="white" agents={agents.white} active={toMove === "white" && !ended} />
+        </section>
 
-      <section className="flex flex-col gap-3">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-xs uppercase tracking-[0.18em] text-ink/50 dark:text-paper/50">
+        <aside
+          className={`flex flex-col overflow-hidden rounded-xl border border-ink/10 bg-ink/[0.02] transition-[width] duration-300 dark:border-paper/10 dark:bg-paper/[0.02] lg:self-stretch ${
+            timelineOpen ? "lg:w-[380px]" : "lg:w-[48px]"
+          }`}
+        >
+          <TimelineHeader
+            open={timelineOpen}
+            onToggle={() => setTimelineOpen((v) => !v)}
+            turnCount={grouped.turns.length}
+            eventCount={events.length}
+          />
+          <div
+            ref={timelineRef}
+            className={`flex flex-col gap-3 overflow-y-auto px-4 pb-4 lg:flex-1 ${
+              timelineOpen ? "" : "hidden lg:hidden"
+            }`}
+          >
+            {grouped.opening && <OpeningBanner event={grouped.opening} />}
+            {grouped.turns.length === 0 && !grouped.opening && (
+              <p className="py-8 text-center text-sm text-ink/50 dark:text-paper/50">
+                Waiting for the first event…
+              </p>
+            )}
+            <AnimatePresence initial={false}>
+              {grouped.turns.map((t) => (
+                <TurnCard key={t.key} turn={t} />
+              ))}
+            </AnimatePresence>
+            {grouped.gameOver && <GameOverBanner event={grouped.gameOver} />}
+          </div>
+          {!timelineOpen && (
+            <div className="hidden flex-1 items-center justify-center lg:flex">
+              <span
+                className="font-mono-block text-[11px] uppercase tracking-[0.18em] text-ink/40 dark:text-paper/40"
+                style={{ writingMode: "vertical-rl" }}
+              >
+                Timeline
+              </span>
+            </div>
+          )}
+        </aside>
+      </div>
+    </main>
+  );
+}
+
+function TimelineHeader({
+  open,
+  onToggle,
+  turnCount,
+  eventCount,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  turnCount: number;
+  eventCount: number;
+}) {
+  return (
+    <div
+      className={`flex items-center gap-2 border-b border-ink/10 px-4 py-3 dark:border-paper/10 ${
+        open ? "justify-between" : "justify-center"
+      }`}
+    >
+      {open && (
+        <div className="flex flex-col">
+          <span className="font-mono-block text-[10px] uppercase tracking-[0.18em] text-ink/50 dark:text-paper/50">
             Timeline
-          </h2>
-          <span className="font-mono-block text-[11px] text-ink/40 dark:text-paper/40">
-            {grouped.turns.length} turn{grouped.turns.length === 1 ? "" : "s"} ·{" "}
-            {events.length} event{events.length === 1 ? "" : "s"}
+          </span>
+          <span className="font-mono-block text-[10px] text-ink/40 dark:text-paper/40">
+            {turnCount} turn{turnCount === 1 ? "" : "s"} · {eventCount} event
+            {eventCount === 1 ? "" : "s"}
           </span>
         </div>
-        <div
-          ref={timelineRef}
-          className="flex max-h-[640px] flex-col gap-4 overflow-y-auto rounded-xl border border-ink/10 bg-ink/[0.02] p-4 dark:border-paper/10 dark:bg-paper/[0.02] sm:p-5"
+      )}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={open ? "Collapse timeline" : "Expand timeline"}
+        className="hidden rounded-md border border-ink/10 p-1.5 text-ink/50 transition hover:border-ember hover:text-ember dark:border-paper/10 dark:text-paper/50 lg:inline-flex"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 20 20"
+          fill="none"
+          className={`transition-transform ${open ? "" : "rotate-180"}`}
+          aria-hidden
         >
-          {grouped.opening && <OpeningBanner event={grouped.opening} />}
-          {grouped.turns.length === 0 && !grouped.opening && (
-            <p className="text-sm text-ink/50 dark:text-paper/50">
-              Waiting for the first event…
-            </p>
-          )}
-          <AnimatePresence initial={false}>
-            {grouped.turns.map((t) => (
-              <TurnCard key={t.key} turn={t} />
-            ))}
-          </AnimatePresence>
-          {grouped.gameOver && <GameOverBanner event={grouped.gameOver} />}
-        </div>
-      </section>
-    </main>
+          <path
+            d="M12 4l-6 6 6 6"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -335,12 +407,17 @@ function AgentCard({ agent }: { agent: AgentState }) {
               </span>
             )}
           </div>
+          {agent.lastProposedMove && (
+            <span className="mt-0.5 block font-mono-block text-[10px] text-ink/40 dark:text-paper/40">
+              → {agent.lastProposedMove}
+            </span>
+          )}
           {agent.lastStatement ? (
-            <p className="mt-1 line-clamp-3 text-xs text-ink/70 dark:text-paper/70">
+            <p className="mt-1.5 text-[13px] leading-snug text-ink/70 dark:text-paper/70">
               &ldquo;{agent.lastStatement}&rdquo;
             </p>
           ) : (
-            <p className="mt-1 text-xs italic text-ink/40 dark:text-paper/40">
+            <p className="mt-1.5 text-xs italic text-ink/40 dark:text-paper/40">
               {agent.status === "thinking" ? "thinking…" : "yet to speak"}
             </p>
           )}
@@ -458,6 +535,22 @@ function TurnCard({ turn }: { turn: Turn }) {
                 );
               })}
             </ul>
+          </section>
+        )}
+
+        {/* Phase 1.5: negotiation bar chart — visual summary */}
+        {turn.proposals.length > 1 && (
+          <section>
+            <PhaseLabel>Negotiation</PhaseLabel>
+            <div className="mt-2">
+              <NegotiationBars
+                data={turn.proposals.map((e): BarDatum => {
+                  const p = normalizeProposal(e);
+                  return { role: p.role, confidence: p.confidence, move: p.move };
+                })}
+                winnerRole={winnerRole}
+              />
+            </div>
           </section>
         )}
 
