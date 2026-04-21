@@ -6,7 +6,12 @@ export interface Proposal {
   trash_talk?: string | null;
 }
 
-export type EventType =
+/**
+ * Canonical event types. The orchestrator may emit additional custom types
+ * (e.g. MOVE_PLAYED, AUCTION_RESULT) so we keep `type` as a plain string —
+ * narrowing still works on string-literal checks.
+ */
+export type CanonicalEventType =
   | "GAME_CREATED"
   | "TURN_STARTED"
   | "PROPOSAL"
@@ -21,7 +26,7 @@ export type EventType =
 export interface BaseEvent {
   seq: number;
   turn: number;
-  type: EventType;
+  type: CanonicalEventType | string;
   [key: string]: unknown;
 }
 

@@ -19,6 +19,7 @@ All LLM inference happens inside your local session. For Claude Pro/Max users th
 
 - **Do NOT \`pip install\` anything.** You do not need python-chess, chess.js, or any other library locally. Everything you need (current FEN, legal moves, side to move, move validation) comes from the API. Installing packages on the user's machine is a bug, not a feature.
 - **The API is authoritative for move legality.** If you think a move is legal and the server says 400, the server is right.
+- **Use the canonical event types and shapes from Section 10.** The viewer is tolerant but not telepathic — if you invent \`MOVE_PLAYED\` when the spec says \`MOVE\`, or put \`group\` where the spec says \`agent\`, rows render as "· white → ''" instead of the speech bubble.
 - **Never break character inside piece-agent sub-agent prompts.**
 
 ## 0. Default configuration
@@ -225,7 +226,79 @@ When \`status\` is anything but \`ongoing\`, or you've played \`max_turns\`:
 3. Remind them: \`Full replay available at: {watch_url}\`.
 4. Stop the loop.
 
-## 9. State reference (copyable)
+## 10. Canonical event schemas
+
+Everything you POST to \`${API}/games/{id}/events\` MUST use one of these \`type\` values and EXACTLY the shape shown. Fields marked optional can be omitted. Do not rename \`agent\` to \`group\`, do not invent \`MOVE_PLAYED\`, do not flatten \`proposal\`.
+
+**PROPOSAL** — one per piece-agent per round. The body is in a nested \`proposal\` object (not at the top level):
+
+\`\`\`json
+{
+  "type": "PROPOSAL",
+  "turn": 12,
+  "side": "white",
+  "agent": "knights",
+  "proposal": {
+    "proposed_move": "g1f3",
+    "reasoning": "Develop; eye on e5.",
+    "public_statement": "Hark! I ride to f3!",
+    "confidence": 78,
+    "trash_talk": "Tremble, pawn on e5."
+  }
+}
+\`\`\`
+
+The \`agent\` value MUST be one of: \`pawns\`, \`knights\`, \`bishops\`, \`rooks\`, \`queen\`, \`king\`. Personality names (e.g. "Sir Percival") belong inside \`public_statement\`, not in \`agent\`.
+
+**TURN_STARTED** — optional but nice; marks the start of deliberation for one side. Makes the feed readable.
+
+\`\`\`json
+{ "type": "TURN_STARTED", "turn": 12, "side": "white" }
+\`\`\`
+
+**AUCTION_RESULT** / **VOTE** / **DEBATE** — strategy resolution events. Tell viewers who won negotiations.
+
+\`\`\`json
+{ "type": "AUCTION_RESULT", "turn": 12, "side": "white", "winner": "knights", "move": "g1f3" }
+\`\`\`
+
+**REACTION** — a piece speaks after a move. Same shape as PROPOSAL's top-level.
+
+\`\`\`json
+{
+  "type": "REACTION",
+  "turn": 12,
+  "side": "black",
+  "agent": "pawns",
+  "public_statement": "Oh no, not e4."
+}
+\`\`\`
+
+**KILL_LINE** — a capture dialogue. Both sides speak.
+
+\`\`\`json
+{
+  "type": "KILL_LINE",
+  "turn": 14,
+  "capturer": "knights",
+  "captured": "pawns",
+  "last_words": "Mother, I tried.",
+  "eulogy": "Brief but honorable."
+}
+\`\`\`
+
+**GAME_OVER** — once, at the end.
+
+\`\`\`json
+{ "type": "GAME_OVER", "turn": 28, "winner": "white", "reason": "checkmate" }
+\`\`\`
+
+**Events the SERVER writes for you — do NOT also post these yourself**:
+
+- \`GAME_CREATED\` — server writes this on \`POST /games\`.
+- \`MOVE\` — server writes this on \`POST /games/{id}/move\` (with \`san\`, \`fen_after\`). The \`POST /move\` endpoint is how you play a move; it validates legality and records the event atomically. Never post a \`MOVE\` or \`MOVE_PLAYED\` event by hand — it creates duplicates and loses validation.
+
+## 11. State reference (copyable)
 
 You maintain exactly this state in memory across turns:
 
@@ -242,7 +315,7 @@ Rehydrate after /compact or context loss by reading \`GET ${API}/games/{id}\` �
 
 ---
 
-That's the entire protocol. Go create the game, print the watch URL to the user, and start the turn loop. Good luck.
+That's the entire protocol. Go create the game, print the watch URL to the user, and start the turn loop. If the viewer shows "conn error" or rows like "· white → ''", re-read Section 10 — you drifted from the canonical event shapes.
 `;
 
 export function GET() {

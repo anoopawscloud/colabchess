@@ -12,6 +12,7 @@ import {
   isRole,
 } from "@/lib/agents";
 import type { BaseEvent, Snapshot } from "@/lib/types";
+import { isMoveType, normalizeMove, normalizeProposal } from "@/lib/events";
 
 type Side = "white" | "black";
 
@@ -46,26 +47,24 @@ function deriveAgents(events: BaseEvent[]): Record<Side, Record<Role, AgentState
   const out = emptyAgents();
   for (const e of events) {
     if (e.type === "PROPOSAL") {
-      const side = (e as any).side as Side;
-      const agent = (e as any).agent as string;
-      const p = (e as any).proposal ?? {};
-      if ((side === "white" || side === "black") && isRole(agent)) {
-        out[side][agent] = {
-          role: agent,
-          side,
-          lastStatement: p.public_statement ?? null,
-          lastProposedMove: p.proposed_move ?? null,
-          lastConfidence: typeof p.confidence === "number" ? p.confidence : null,
+      const p = normalizeProposal(e);
+      if ((p.side === "white" || p.side === "black") && isRole(p.role)) {
+        out[p.side][p.role] = {
+          role: p.role,
+          side: p.side,
+          lastStatement: p.publicStatement || null,
+          lastProposedMove: p.move || null,
+          lastConfidence: p.confidence,
           status: "proposed",
         };
       }
     } else if (e.type === "REACTION") {
       const side = (e as any).side as Side;
-      const agent = (e as any).agent as string;
+      const agent = ((e as any).agent ?? (e as any).group) as string;
       if ((side === "white" || side === "black") && isRole(agent)) {
         out[side][agent].lastStatement = (e as any).public_statement ?? out[side][agent].lastStatement;
       }
-    } else if (e.type === "MOVE") {
+    } else if (isMoveType(e.type)) {
       for (const r of ROLES) {
         out.white[r].status = out.white[r].status === "proposed" ? "done" : out.white[r].status;
         out.black[r].status = out.black[r].status === "proposed" ? "done" : out.black[r].status;
@@ -130,10 +129,10 @@ export function GameViewer({
           setEvents((prev) => [...prev, ...data.events]);
           setCursor(data.next_seq);
           const lastMove = [...data.events].reverse().find((e) => e.type === "MOVE");
-          if (lastMove && (lastMove as any).fen_after) {
+          if (lastMove && (lastMove as Record<string, unknown>).fen_after) {
             setSnapshot((s) => ({
               ...s,
-              fen: (lastMove as any).fen_after,
+              fen: (lastMove as Record<string, unknown>).fen_after as string,
               status: data.status,
             }));
           } else if (data.status !== snapshot.status) {
@@ -329,160 +328,214 @@ function AgentCard({ agent }: { agent: AgentState }) {
   );
 }
 
+function Row({ children }: { children: React.ReactNode }) {
+  return (
+    <motion.li
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex gap-3 text-sm"
+    >
+      {children}
+    </motion.li>
+  );
+}
+
+function Seq({ seq, tone = "muted" }: { seq: number; tone?: "muted" | "ember" | "rose" }) {
+  const color =
+    tone === "ember"
+      ? "text-ember"
+      : tone === "rose"
+        ? "text-rose-600"
+        : "text-ink/40 dark:text-paper/40";
+  return (
+    <span className={`font-mono-block w-12 shrink-0 text-[11px] ${color}`}>
+      {String(seq).padStart(3, "0")}
+    </span>
+  );
+}
+
 function EventRow({ event }: { event: BaseEvent }) {
-  const time = String(event.seq).padStart(3, "0");
-  const common = "flex gap-3 text-sm";
   if (event.type === "GAME_CREATED") {
     return (
-      <motion.li
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        className={common}
-      >
-        <span className="font-mono-block w-12 shrink-0 text-[11px] text-ink/40 dark:text-paper/40">
-          {time}
-        </span>
-        <span className="italic text-ink/70 dark:text-paper/70">
-          Game begins.
-        </span>
-      </motion.li>
+      <Row>
+        <Seq seq={event.seq} />
+        <span className="italic text-ink/70 dark:text-paper/70">Game begins.</span>
+      </Row>
     );
   }
-  if (event.type === "MOVE") {
-    const move = (event as any).san ?? (event as any).move;
-    const side = (event as any).side as Side;
+
+  if (event.type === "TURN_STARTED") {
+    const side = ((event as Record<string, unknown>).side as Side) ?? "white";
     return (
-      <motion.li
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        className={common}
-      >
-        <span className="font-mono-block w-12 shrink-0 text-[11px] text-ember">
-          {time}
+      <Row>
+        <Seq seq={event.seq} />
+        <span className="text-ink/60 dark:text-paper/60">
+          Turn {event.turn} · <span className="font-serif-display capitalize">{side}</span>{" "}
+          deliberates.
         </span>
+      </Row>
+    );
+  }
+
+  if (event.type === "MOVE") {
+    const m = normalizeMove(event);
+    return (
+      <Row>
+        <Seq seq={event.seq} tone="ember" />
         <div className="flex items-center gap-2">
           <span className="text-ember">✓</span>
           <span>
-            <span className="font-serif-display">{side}</span> plays{" "}
-            <span className="font-mono-block">{move}</span>
+            <span className="font-serif-display capitalize">{m.side}</span> plays{" "}
+            <span className="font-mono-block">{m.san ?? m.move}</span>
           </span>
         </div>
-      </motion.li>
+      </Row>
     );
   }
-  if (event.type === "PROPOSAL") {
-    const side = (event as any).side as Side;
-    const agent = (event as any).agent as string;
-    const p = (event as any).proposal ?? {};
-    const glyph = isRole(agent) ? ROLE_GLYPH[agent] : "·";
-    const accent = isRole(agent) ? ROLE_ACCENT[agent] : "";
+
+  if (event.type === "MOVE_PLAYED") {
+    // Non-canonical narration from the orchestrator. Render distinctly so the
+    // reader can tell this from the server-written MOVE event.
+    const m = normalizeMove(event);
     return (
-      <motion.li
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        className={common}
-      >
-        <span className="font-mono-block w-12 shrink-0 text-[11px] text-ink/40 dark:text-paper/40">
-          {time}
+      <Row>
+        <Seq seq={event.seq} />
+        <span className="text-ink/50 dark:text-paper/50">
+          <span className="font-serif-display capitalize">{m.side}</span> is about to play{" "}
+          <span className="font-mono-block">{m.move}</span>…
         </span>
+      </Row>
+    );
+  }
+
+  if (event.type === "PROPOSAL") {
+    const p = normalizeProposal(event);
+    const glyph = isRole(p.role) ? ROLE_GLYPH[p.role as Role] : "·";
+    const accent = isRole(p.role) ? ROLE_ACCENT[p.role as Role] : "";
+    const label = isRole(p.role) ? ROLE_LABEL[p.role as Role] : p.role || "agent";
+    return (
+      <Row>
+        <Seq seq={event.seq} />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <span className={`text-lg leading-none ${accent}`}>{glyph}</span>
             <span className="font-serif-display text-sm capitalize">
-              {side} {isRole(agent) ? agent : agent}
+              {p.side} {label}
             </span>
-            <span className="font-mono-block text-[11px] text-ink/40 dark:text-paper/40">
-              → {p.proposed_move}
-            </span>
+            {p.move && (
+              <span className="font-mono-block text-[11px] text-ink/40 dark:text-paper/40">
+                → {p.move}
+              </span>
+            )}
+            {p.confidence !== null && (
+              <span className="font-mono-block text-[10px] text-ink/40 dark:text-paper/40">
+                conf {p.confidence}
+              </span>
+            )}
           </div>
-          <p className="mt-1 text-ink/80 dark:text-paper/80">
-            &ldquo;{p.public_statement}&rdquo;
-          </p>
-          {p.trash_talk && (
-            <p className="mt-1 text-xs italic text-ember">
-              {p.trash_talk}
+          {p.publicStatement ? (
+            <p className="mt-1 text-ink/80 dark:text-paper/80">
+              &ldquo;{p.publicStatement}&rdquo;
+            </p>
+          ) : (
+            <p className="mt-1 text-xs italic text-ink/40 dark:text-paper/40">
+              (no public statement)
             </p>
           )}
+          {p.trashTalk && (
+            <p className="mt-1 text-xs italic text-ember">{p.trashTalk}</p>
+          )}
         </div>
-      </motion.li>
+      </Row>
     );
   }
-  if (event.type === "REACTION") {
-    const side = (event as any).side as Side;
-    const agent = (event as any).agent as string;
-    const glyph = isRole(agent) ? ROLE_GLYPH[agent] : "·";
+
+  if (event.type === "AUCTION_RESULT" || event.type === "VOTE" || event.type === "DEBATE") {
+    const e = event as unknown as Record<string, unknown>;
+    const winner = (e.winner as string) ?? (e.agent as string) ?? (e.group as string) ?? "";
+    const move = (e.move as string) ?? (e.proposed_move as string) ?? "";
     return (
-      <motion.li
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        className={common}
-      >
-        <span className="font-mono-block w-12 shrink-0 text-[11px] text-ink/40 dark:text-paper/40">
-          {time}
-        </span>
+      <Row>
+        <Seq seq={event.seq} />
+        <div className="flex flex-wrap items-baseline gap-2">
+          <span className="font-mono-block text-[10px] uppercase tracking-[0.14em] text-ink/40 dark:text-paper/40">
+            {event.type.toLowerCase().replace("_", " ")}
+          </span>
+          {winner && (
+            <span className="font-serif-display capitalize">{winner}</span>
+          )}
+          {move && <span className="font-mono-block text-xs">→ {move}</span>}
+        </div>
+      </Row>
+    );
+  }
+
+  if (event.type === "REACTION") {
+    const e = event as unknown as Record<string, unknown>;
+    const side = (e.side as Side) ?? "white";
+    const agent = (e.agent as string) ?? (e.group as string) ?? "";
+    const glyph = isRole(agent) ? ROLE_GLYPH[agent as Role] : "·";
+    return (
+      <Row>
+        <Seq seq={event.seq} />
         <div className="flex gap-2">
           <span className="leading-none">{glyph}</span>
           <p className="text-ink/70 dark:text-paper/70">
             <span className="font-serif-display capitalize">
               {side} {agent}
             </span>
-            : &ldquo;{(event as any).public_statement}&rdquo;
+            : &ldquo;{(e.public_statement as string) ?? ""}&rdquo;
           </p>
         </div>
-      </motion.li>
+      </Row>
     );
   }
+
   if (event.type === "KILL_LINE") {
+    const e = event as unknown as Record<string, unknown>;
     return (
-      <motion.li
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        className={common}
-      >
-        <span className="font-mono-block w-12 shrink-0 text-[11px] text-rose-600">
-          {time}
-        </span>
+      <Row>
+        <Seq seq={event.seq} tone="rose" />
         <div className="flex flex-col gap-0.5 text-sm">
           <span>
-            ⚔ <strong>{(event as any).capturer}</strong> vs{" "}
-            <strong>{(event as any).captured}</strong>
+            ⚔ <strong>{e.capturer as string}</strong> vs{" "}
+            <strong>{e.captured as string}</strong>
           </span>
           <span className="italic text-ink/70 dark:text-paper/70">
-            &ldquo;{(event as any).last_words}&rdquo;
+            &ldquo;{e.last_words as string}&rdquo;
           </span>
         </div>
-      </motion.li>
+      </Row>
     );
   }
+
   if (event.type === "GAME_OVER") {
+    const e = event as unknown as Record<string, unknown>;
     return (
-      <motion.li
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        className={common}
-      >
-        <span className="font-mono-block w-12 shrink-0 text-[11px] text-ember">
-          {time}
-        </span>
+      <Row>
+        <Seq seq={event.seq} tone="ember" />
         <span>
-          🏁 <strong className="font-serif-display">{(event as any).winner}</strong>{" "}
-          wins by {(event as any).reason}
+          🏁 <strong className="font-serif-display capitalize">{e.winner as string}</strong>{" "}
+          wins by {e.reason as string}
         </span>
-      </motion.li>
+      </Row>
     );
   }
+
+  // Any other custom event type: render the type + a trimmed JSON snapshot.
+  const raw = JSON.stringify(event, null, 0);
+  const preview = raw.length > 140 ? raw.slice(0, 140) + "…" : raw;
   return (
-    <motion.li
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={common}
-    >
-      <span className="font-mono-block w-12 shrink-0 text-[11px] text-ink/40 dark:text-paper/40">
-        {time}
-      </span>
-      <span className="font-mono-block text-xs text-ink/60 dark:text-paper/60">
-        {event.type}
-      </span>
-    </motion.li>
+    <Row>
+      <Seq seq={event.seq} />
+      <div className="flex flex-col gap-0.5">
+        <span className="font-mono-block text-xs text-ink/60 dark:text-paper/60">
+          {event.type}
+        </span>
+        <span className="font-mono-block text-[10px] text-ink/40 dark:text-paper/40">
+          {preview}
+        </span>
+      </div>
+    </Row>
   );
 }
