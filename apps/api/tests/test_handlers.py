@@ -173,6 +173,10 @@ class TestSnapshot:
         assert body["id"] == gid
         assert body["fen"].startswith("rnbqkbnr")
         assert body["status"] == "ongoing"
+        assert body["side_to_move"] == "white"
+        assert isinstance(body["legal_moves"], list)
+        assert "e2e4" in body["legal_moves"]
+        assert len(body["legal_moves"]) == 20
         types = [e["type"] for e in body["events"]]
         assert types == ["GAME_CREATED", "PROPOSAL"]
 

@@ -10,10 +10,16 @@ You are the orchestrator for a chess match played entirely by AI sub-agents. Thi
 ## Who does what
 
 - **You** (the current coding-agent session) are the engine. You spawn piece-agent sub-agents, collect their proposals, resolve the winner, and play the move.
-- **The API at \`${API}\`** is a passive relay. It stores state and authoritatively validates moves. It never calls an LLM.
+- **The API at \`${API}\`** is a passive relay. It stores state and authoritatively validates moves via python-chess. It never calls an LLM.
 - **The viewer at \`${SITE}/game/{id}\`** renders the match live for humans.
 
 All LLM inference happens inside your local session. For Claude Pro/Max users this is effectively free.
+
+## Hard rules
+
+- **Do NOT \`pip install\` anything.** You do not need python-chess, chess.js, or any other library locally. Everything you need (current FEN, legal moves, side to move, move validation) comes from the API. Installing packages on the user's machine is a bug, not a feature.
+- **The API is authoritative for move legality.** If you think a move is legal and the server says 400, the server is right.
+- **Never break character inside piece-agent sub-agent prompts.**
 
 ## 0. Default configuration
 
@@ -81,31 +87,13 @@ Repeat until the game has ended (status becomes \`checkmate\`, \`stalemate\`, \`
 GET ${API}/games/{id}
 \`\`\`
 
-Returns \`{fen, status, config, events}\`. Parse who is to move from the FEN's side field (\`w\` or \`b\`).
+Returns \`{fen, status, side_to_move, legal_moves, config, events, next_seq}\`. The \`side_to_move\` is \`"white"\` or \`"black"\`; \`legal_moves\` is the full UCI list for that side. **Use these directly. Do not compute them yourself.**
 
-**3b. Compute context for the side to move**
+**3b. Bucket legal moves by piece-group**
 
-From the FEN, figure out each agent's legal moves:
+For each UCI move in \`legal_moves\`, determine which piece-group it belongs to from the origin square + the FEN's piece placement. You can do this inline — no library needed. The six buckets are: \`pawns\`, \`knights\`, \`bishops\`, \`rooks\`, \`queen\`, \`king\`. Pass each bucket to the corresponding piece-agent in step 3c.
 
-- \`pawns\`: all pawn moves
-- \`knights\`: all knight moves
-- \`bishops\`: all bishop moves
-- \`rooks\`: all rook moves
-- \`queen\`: all queen moves
-- \`king\`: king moves + castling
-
-Use \`python-chess\` in a Bash tool call if helpful:
-
-\`\`\`bash
-python3 -c "
-import chess
-b = chess.Board('${"$"}FEN')
-for m in b.legal_moves:
-    print(m.uci(), b.piece_at(m.from_square).piece_type)
-"
-\`\`\`
-
-Or reason from the FEN directly. Both work.
+If a bucket is empty (e.g. you have no more knights), skip that agent — they have nothing to propose.
 
 **3c. Spawn piece-agents in parallel — the critical step**
 
@@ -250,7 +238,7 @@ turn_number   = 1
 memory        = { "captures": [...], "rivalries": [...], ... }    # small; append per turn
 \`\`\`
 
-Rehydrate after /compact or context loss by reading \`GET ${API}/games/{id}\`. The server is the source of truth.
+Rehydrate after /compact or context loss by reading \`GET ${API}/games/{id}\` — it returns everything including current \`legal_moves\` and \`side_to_move\`. The server is the source of truth.
 
 ---
 

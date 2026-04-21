@@ -136,10 +136,16 @@ def snapshot(game_id: str) -> Response:
         raise NotFoundError(f"game {game_id!r} not found")
 
     events = repo.list_events(game_id, since=0, limit=500)
+    legal_moves = (
+        legal_moves_uci(game.current_fen) if game.status == "ongoing" else []
+    )
+    side_to_move = game.current_fen.split(" ")[1] if " " in game.current_fen else "w"
     body = {
         "id": game.game_id,
         "fen": game.current_fen,
         "status": game.status,
+        "side_to_move": "white" if side_to_move == "w" else "black",
+        "legal_moves": legal_moves,
         "config": json.loads(game.config_json),
         "next_seq": game.next_seq,
         "events": events,
