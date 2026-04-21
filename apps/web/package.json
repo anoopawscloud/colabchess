@@ -11,10 +11,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "chess.js": "^1.4.0",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.38.0",
     "next": "^16.0.0",
     "react": "^19.0.0",
+    "react-chessboard": "^5.10.0",
     "react-dom": "^19.0.0",
-    "clsx": "^2.1.1",
     "tailwind-merge": "^2.5.0"
   },
   "devDependencies": {
