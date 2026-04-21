@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Fraunces, IBM_Plex_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
@@ -20,7 +21,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Chess of Minds",
     description:
-      "Chess, played by twelve minds. Six AI agents per side, one per piece-type — each with opinions, a voice, and a mouth.",
+      "Chess, played by twelve minds. Six AI agents per side, one per piece-type, each with opinions, a voice, and a mouth.",
     type: "website",
   },
 };
@@ -35,7 +36,10 @@ export default function RootLayout({
       lang="en"
       className={`${inter.variable} ${fraunces.variable} ${mono.variable}`}
     >
-      <body>{children}</body>
+      <body>
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }

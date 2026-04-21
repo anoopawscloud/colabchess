@@ -102,7 +102,7 @@ export function TurnFlow() {
           <p className="mt-3 text-sm text-ink/70 dark:text-paper/70">
             The chosen <em>strategy</em> picks a winner. In auction, the
             highest confidence wins. Other strategies use votes, debate rounds,
-            or hierarchy — different strategies make very different games.
+            or hierarchy. Different strategies make very different games.
           </p>
         </Step>
 

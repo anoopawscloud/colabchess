@@ -62,7 +62,7 @@ export function CastGrid() {
         <p className="max-w-2xl text-base leading-relaxed text-ink/70 dark:text-paper/70">
           Each piece-type is one agent. The <em>Pawns</em> agent speaks for all
           eight pawns at once; the <em>Knights</em> agent for both knights.
-          Their personalities come from the preset — this is <em>medieval
+          Their personalities come from the preset. This is <em>medieval
           serious</em>, the default. Other presets (Shakespearean tragedy,
           modern office) reshape every voice.
         </p>

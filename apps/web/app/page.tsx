@@ -43,10 +43,10 @@ export default function LandingPage() {
             <span className="text-ember">twelve</span> minds.
           </h1>
           <p className="max-w-xl text-lg leading-relaxed text-ink/70 dark:text-paper/70">
-            Six AI agents per side — one per piece-type — each with their own
+            Six AI agents per side, one per piece-type, each with their own
             personality, voice, and opinions about the position. They propose,
             argue, and negotiate every move. The point isn&rsquo;t to play
-            perfect chess; it&rsquo;s to watch minds collide.
+            perfect chess. It&rsquo;s to watch minds collide.
           </p>
 
           <div className="flex flex-col gap-3 pt-2">
@@ -92,7 +92,7 @@ export default function LandingPage() {
           <WhyCard
             ordinal="02"
             title="Strategies are a design space."
-            body="Auction, democracy, monarchy, debate, consensus, hierarchy — each produces a different game from the same position. This is collective-decision theory you can watch in 60 seconds."
+            body="Auction, democracy, monarchy, debate, consensus, hierarchy. Each produces a different game from the same position. This is collective-decision theory you can watch in 60 seconds."
           />
           <WhyCard
             ordinal="03"
@@ -111,43 +111,11 @@ export default function LandingPage() {
       {/* ─── Strategies ───────────────────────────────────────────────────── */}
       <StrategyGrid />
 
-      {/* ─── How it works (technical, brief) ───────────────────────────────── */}
-      <section className="flex flex-col gap-6">
-        <div className="flex flex-col gap-2">
-          <span className="text-xs uppercase tracking-[0.2em] text-ink/50 dark:text-paper/50">
-            The stack
-          </span>
-          <h2 className="font-serif-display text-3xl leading-tight tracking-tight sm:text-4xl">
-            Three layers, narrow roles.
-          </h2>
-        </div>
-        <ol className="flex flex-col gap-4 sm:flex-row sm:gap-6">
-          <StackStep
-            n={1}
-            label="Your Claude Code"
-            body="Fetches /play.md, creates a game, spawns piece-agent sub-agents per turn, runs the negotiation locally, POSTs moves. Every LLM call happens here — so it costs you nothing on Pro/Max."
-            accent="text-ember"
-          />
-          <StackStep
-            n={2}
-            label="AWS backend"
-            body="A stateless relay on Lambda + DynamoDB. Validates moves with python-chess, stores the event log, serves the snapshot. Never calls an LLM."
-            accent="text-indigo-600 dark:text-indigo-400"
-          />
-          <StackStep
-            n={3}
-            label="This browser"
-            body="Next.js + react-chessboard. Polls the API every 1.5s. Renders the board, the twelve agent cards, and the turn-by-turn negotiation feed."
-            accent="text-emerald-700 dark:text-emerald-400"
-          />
-        </ol>
-      </section>
-
       {/* ─── Footer ───────────────────────────────────────────────────────── */}
       <footer className="mt-auto flex flex-col gap-3 border-t border-ink/10 pt-8 text-xs text-ink/50 dark:border-paper/10 dark:text-paper/50 sm:flex-row sm:items-center sm:justify-between">
         <span>
-          Made on Earth, 2026. Open source. No license yet — don&rsquo;t ship
-          your own games on top until there is one.
+          Made on Earth, 2026. Open source. No license yet, so don&rsquo;t
+          ship your own games on top until there is one.
         </span>
         <div className="flex gap-4">
           <a
@@ -188,28 +156,3 @@ function WhyCard({
   );
 }
 
-function StackStep({
-  n,
-  label,
-  body,
-  accent,
-}: {
-  n: number;
-  label: string;
-  body: string;
-  accent: string;
-}) {
-  return (
-    <li className="flex flex-1 flex-col gap-2 rounded-xl border border-ink/10 bg-paper/60 p-5 dark:border-paper/10 dark:bg-ink/40">
-      <div className="flex items-baseline gap-3">
-        <span className={`font-mono-block text-lg ${accent}`}>
-          {String(n).padStart(2, "0")}
-        </span>
-        <span className="font-serif-display text-lg">{label}</span>
-      </div>
-      <p className="text-sm leading-relaxed text-ink/70 dark:text-paper/70">
-        {body}
-      </p>
-    </li>
-  );
-}

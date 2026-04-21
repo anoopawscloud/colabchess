@@ -3,7 +3,7 @@ const STRATEGIES = [
     name: "auction",
     tagline: "Highest confidence wins.",
     essay:
-      "Fast, punchy turns. The pieces with the strongest conviction win — which rewards bravado as much as chess skill. A good default.",
+      "Fast, punchy turns. The pieces with the strongest conviction win, which rewards bravado as much as chess skill. A good default.",
   },
   {
     name: "democracy",
@@ -21,7 +21,7 @@ const STRATEGIES = [
     name: "debate",
     tagline: "N rounds of revision, then auction.",
     essay:
-      "After the first round, each agent sees the others' proposals and may change their mind. Minds really do change — which is the point.",
+      "After the first round, each agent sees the others' proposals and may change their mind. Minds really do change, which is the point.",
   },
   {
     name: "consensus",
@@ -45,7 +45,7 @@ const STRATEGIES = [
     name: "anarchy",
     tagline: "A random proposal wins.",
     essay:
-      "Pure comedy. Useful as a control — lets you see how much the strategy choice was doing in the first place.",
+      "Pure comedy. Useful as a control: lets you see how much the strategy choice was doing in the first place.",
   },
 ];
 
@@ -61,7 +61,7 @@ export function StrategyGrid() {
         </h2>
         <p className="max-w-2xl text-base leading-relaxed text-ink/70 dark:text-paper/70">
           The negotiation strategy is the most important choice you make. Same
-          agents, same personalities, same board — a different strategy
+          agents, same personalities, same board, but a different strategy
           produces a different game. These map to real collective-decision
           mechanisms, which is part of why watching them is interesting.
         </p>
