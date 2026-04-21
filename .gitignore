@@ -42,3 +42,6 @@ state/
 coverage/
 .coverage
 *.lcov
+
+# TypeScript incremental build cache
+*.tsbuildinfo
