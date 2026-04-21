@@ -39,7 +39,7 @@ export class ChessMindsStack extends cdk.Stack {
       }),
       environment: {
         GAME_TABLE: gameTable.tableName,
-        WATCH_URL_BASE: process.env.WATCH_URL_BASE ?? "https://chessminds.vercel.app/game",
+        WATCH_URL_BASE: process.env.WATCH_URL_BASE ?? "https://chessminds-psi.vercel.app/game",
         GAME_TTL_SECONDS: "604800",
       },
       memorySize: 512,

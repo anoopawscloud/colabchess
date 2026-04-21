@@ -1,7 +1,7 @@
 import { CopyableCommand } from "@/components/CopyableCommand";
 
 const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://chessminds.vercel.app";
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://chessminds-psi.vercel.app";
 const PROMPT = `Use ${SITE_URL}/play.md to start a chess game`;
 
 export default function LandingPage() {

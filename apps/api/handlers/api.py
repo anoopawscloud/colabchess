@@ -51,7 +51,7 @@ def _repo() -> GameRepo:
 
 
 def _watch_url(game_id: str) -> str:
-    base = os.environ.get("WATCH_URL_BASE", "https://chessminds.vercel.app/game")
+    base = os.environ.get("WATCH_URL_BASE", "https://chessminds-psi.vercel.app/game")
     return f"{base}/{game_id}"
 
 
