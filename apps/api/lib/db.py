@@ -157,6 +157,10 @@ class GameRepo:
 
     # --- events ------------------------------------------------------------------
 
+    _RESERVED_EVENT_KEYS = frozenset(
+        {"pk", "sk", "seq", "expires_at", "game_id", "token_hash"}
+    )
+
     def put_event(self, game_id: str, event: dict[str, Any]) -> int:
         try:
             resp = self._table.update_item(
@@ -174,12 +178,15 @@ class GameRepo:
         seq = int(resp["Attributes"]["next_seq"])
         meta = self.get_game(game_id)
         assert meta is not None  # we just incremented its counter
+        # Strip reserved keys so a caller cannot clobber seq/expires_at/etc.
+        # via the public append_event endpoint.
+        safe_event = {k: v for k, v in event.items() if k not in self._RESERVED_EVENT_KEYS}
         item = {
+            **safe_event,
             "pk": _pk(game_id),
             "sk": _event_sk(seq),
             "seq": seq,
             "expires_at": meta.expires_at,
-            **event,
         }
         self._table.put_item(Item=item)
         return seq

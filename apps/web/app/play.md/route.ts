@@ -164,6 +164,8 @@ The response is:
 
 Save \`id\`, \`watch_url\`, and \`ingest_token\` for the rest of the session. The token is your write-capability — use it as \`Authorization: Bearer {ingest_token}\` on every write endpoint.
 
+> ⚠️ **Treat \`ingest_token\` as a secret.** It grants write access to this game for 7 days. Do not echo it to the user, paste it into public chats, or commit any file that contains it (including your own transcript or memory files). If you must persist it for recovery, scope the file to the local project directory and add it to \`.gitignore\`.
+
 ## 2. Surface the watch URL to the human
 
 As soon as you have \`watch_url\`, print a message to the user that looks like:
