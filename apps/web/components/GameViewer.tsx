@@ -202,7 +202,7 @@ export function GameViewer({
     events.length > 0;
 
   return (
-    <main className="mx-auto flex max-w-[1400px] flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6">
+    <main className="mx-auto flex min-h-[100svh] max-w-[1400px] flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6 xl:max-w-[1600px] 2xl:max-w-[1920px]">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4 text-sm">
           <span className="font-serif-display text-base">Chess of Minds</span>
@@ -219,8 +219,8 @@ export function GameViewer({
         </div>
       </header>
 
-      <div className="flex flex-col gap-5 lg:flex-row lg:gap-6">
-        <section className="flex-1 grid grid-cols-1 gap-4 md:grid-cols-[minmax(230px,260px)_minmax(0,1fr)_minmax(230px,260px)] md:gap-5">
+      <div className="flex min-h-0 flex-1 flex-col gap-5 lg:flex-row lg:items-stretch lg:gap-6">
+        <section className="flex-1 grid grid-cols-1 gap-4 md:grid-cols-[minmax(240px,280px)_minmax(0,1fr)_minmax(240px,280px)] md:gap-5 xl:grid-cols-[minmax(260px,320px)_minmax(0,1fr)_minmax(260px,320px)] 2xl:grid-cols-[minmax(300px,360px)_minmax(0,1fr)_minmax(300px,360px)]">
           <AgentColumn
             side="black"
             agents={agents.black}
@@ -240,6 +240,24 @@ export function GameViewer({
             <span className="truncate text-center font-mono-block text-[11px] text-ink/50 dark:text-paper/50">
               {snapshot.fen}
             </span>
+            <BoardFooter
+              turn={turn}
+              toMove={toMove}
+              status={snapshot.status}
+              whiteStrategy={
+                (initial.config.white?.negotiation_strategy as string | undefined) ?? "auction"
+              }
+              blackStrategy={
+                (initial.config.black?.negotiation_strategy as string | undefined) ?? "auction"
+              }
+              whitePreset={
+                (initial.config.white?.personality_preset as string | undefined) ?? "medieval_serious"
+              }
+              blackPreset={
+                (initial.config.black?.personality_preset as string | undefined) ?? "medieval_serious"
+              }
+              maxTurns={initial.config.max_turns ?? 60}
+            />
           </div>
           <AgentColumn
             side="white"
@@ -249,8 +267,10 @@ export function GameViewer({
         </section>
 
         <aside
-          className={`flex flex-col overflow-hidden rounded-xl border border-ink/10 bg-ink/[0.02] transition-[width] duration-300 dark:border-paper/10 dark:bg-paper/[0.02] lg:self-stretch ${
-            timelineOpen ? "lg:w-[380px]" : "lg:w-[48px]"
+          className={`flex min-h-0 flex-col overflow-hidden rounded-xl border border-ink/10 bg-ink/[0.02] transition-[width] duration-300 dark:border-paper/10 dark:bg-paper/[0.02] lg:self-stretch ${
+            timelineOpen
+              ? "lg:w-[400px] xl:w-[460px] 2xl:w-[520px]"
+              : "lg:w-[48px]"
           }`}
         >
           <TimelineHeader
@@ -354,6 +374,52 @@ function TimelineHeader({
 }
 
 // ─── Header sub-components ─────────────────────────────────────────────────────
+
+function BoardFooter({
+  turn,
+  toMove,
+  status,
+  whiteStrategy,
+  blackStrategy,
+  whitePreset,
+  blackPreset,
+  maxTurns,
+}: {
+  turn: number;
+  toMove: Side;
+  status: string;
+  whiteStrategy: string;
+  blackStrategy: string;
+  whitePreset: string;
+  blackPreset: string;
+  maxTurns: number;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-3 rounded-lg border border-ink/10 bg-paper/60 p-4 text-xs dark:border-paper/10 dark:bg-ink/40 sm:grid-cols-4">
+      <InfoCell label="Turn" value={`${turn} / ${maxTurns}`} />
+      <InfoCell
+        label="Next move"
+        value={status === "ongoing" ? toMove : status.replace(/_/g, " ")}
+      />
+      <InfoCell label="Strategies" value={`${whiteStrategy} / ${blackStrategy}`} />
+      <InfoCell
+        label="Personalities"
+        value={`${whitePreset.replace(/_/g, " ")} / ${blackPreset.replace(/_/g, " ")}`}
+      />
+    </div>
+  );
+}
+
+function InfoCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-0.5 min-w-0">
+      <span className="font-mono-block text-[9px] uppercase tracking-[0.18em] text-ink/40 dark:text-paper/40">
+        {label}
+      </span>
+      <span className="truncate font-serif-display text-sm capitalize">{value}</span>
+    </div>
+  );
+}
 
 function StatusPill({ status, toMove }: { status: string; toMove: Side }) {
   if (status === "ongoing") {
