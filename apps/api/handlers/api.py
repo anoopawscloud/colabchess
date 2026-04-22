@@ -11,6 +11,7 @@ Auth: `Authorization: Bearer {ingest_token}` on write endpoints. Anyone may view
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 
@@ -38,6 +39,8 @@ from lib.db import (
 
 
 app = APIGatewayHttpResolver()
+_analytics_logger = logging.getLogger("chessminds.analytics")
+_analytics_logger.setLevel(logging.INFO)
 
 
 # --- config from env ---------------------------------------------------------------
@@ -113,6 +116,28 @@ def create_game() -> Response:
             "turn": 0,
             "config": json.loads(req.config.model_dump_json()),
         },
+    )
+
+    # Structured analytics event. Query in CloudWatch Logs Insights with:
+    #   fields @timestamp, @message | filter @message like /"event":"game_started"/
+    mode_obj = getattr(req.config, "mode", None)
+    mode_str = mode_obj.value if hasattr(mode_obj, "value") else (mode_obj or "ai_vs_ai")
+    _analytics_logger.info(
+        json.dumps(
+            {
+                "event": "game_started",
+                "game_id": game_id,
+                "mode": mode_str,
+                "human_plays": getattr(req.config, "human_plays", None),
+                "white_strategy": req.config.white.negotiation_strategy.value,
+                "black_strategy": req.config.black.negotiation_strategy.value,
+                "white_preset": req.config.white.personality_preset.value,
+                "black_preset": req.config.black.personality_preset.value,
+                "white_trash_talk": req.config.white.trash_talk_intensity.value,
+                "black_trash_talk": req.config.black.trash_talk_intensity.value,
+                "max_turns": req.config.max_turns,
+            }
+        )
     )
 
     body = CreateGameResponse(
