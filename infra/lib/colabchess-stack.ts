@@ -39,7 +39,7 @@ export class ChessMindsStack extends cdk.Stack {
       }),
       environment: {
         GAME_TABLE: gameTable.tableName,
-        WATCH_URL_BASE: process.env.WATCH_URL_BASE ?? "https://chessminds-psi.vercel.app/game",
+        WATCH_URL_BASE: process.env.WATCH_URL_BASE ?? "https://chessminds.fun/game",
         GAME_TTL_SECONDS: "604800",
       },
       memorySize: 512,
@@ -72,6 +72,11 @@ export class ChessMindsStack extends cdk.Stack {
     httpApi.addRoutes({
       path: "/games",
       methods: [apigw.HttpMethod.POST],
+      integration: apiIntegration,
+    });
+    httpApi.addRoutes({
+      path: "/stats",
+      methods: [apigw.HttpMethod.GET],
       integration: apiIntegration,
     });
     httpApi.addRoutes({

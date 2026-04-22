@@ -1,4 +1,4 @@
-const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://chessminds-psi.vercel.app";
+const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://chessminds.fun";
 const API =
   process.env.NEXT_PUBLIC_API_BASE ??
   "https://4ckgfcll2h.execute-api.us-east-1.amazonaws.com";

@@ -3,9 +3,10 @@ import { TurnFlow } from "@/components/TurnFlow";
 import { CastGrid } from "@/components/CastGrid";
 import { StrategyGrid } from "@/components/StrategyGrid";
 import { LandingBoard } from "@/components/LandingBoard";
+import { AgentCounter } from "@/components/AgentCounter";
 
 const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://chessminds-psi.vercel.app";
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://chessminds.fun";
 const PROMPT = `Use ${SITE_URL}/play.md to start a chess game`;
 
 const ITALIAN = "rnbqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4";
@@ -21,12 +22,6 @@ export default function LandingPage() {
           </a>
           <a href="/llms.txt" className="hover:text-ink dark:hover:text-paper">
             /llms.txt
-          </a>
-          <a
-            href="https://github.com/anoopawscloud/colabchess"
-            className="hover:text-ink dark:hover:text-paper"
-          >
-            GitHub
           </a>
         </nav>
       </header>
@@ -58,6 +53,7 @@ export default function LandingPage() {
               Your Claude Code session does all the AI work. No API keys, no
               accounts. Free for Pro/Max subscribers at the token level.
             </p>
+            <AgentCounter />
           </div>
         </div>
 
@@ -119,10 +115,12 @@ export default function LandingPage() {
         </span>
         <div className="flex gap-4">
           <a
-            href="https://github.com/anoopawscloud/colabchess"
+            href="https://www.linkedin.com/in/anoop4bhat/"
+            target="_blank"
+            rel="noopener noreferrer"
             className="hover:text-ink dark:hover:text-paper"
           >
-            GitHub
+            LinkedIn
           </a>
           <a href="/llms.txt" className="hover:text-ink dark:hover:text-paper">
             /llms.txt

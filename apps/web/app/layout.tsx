@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   description:
     "A chess game where every piece-type is an AI agent with its own personality. Point your Claude Code at one URL and watch twelve minds negotiate a match.",
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITE_URL ?? "https://chessminds-psi.vercel.app",
+    process.env.NEXT_PUBLIC_SITE_URL ?? "https://chessminds.fun",
   ),
   openGraph: {
     title: "Chess of Minds",

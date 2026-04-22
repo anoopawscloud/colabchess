@@ -133,6 +133,23 @@ class TestCreateGame:
         assert resp["statusCode"] == 400, resp
 
 
+class TestStats:
+    def test_empty_table(self, ddb: None) -> None:
+        resp = _invoke(_event("GET", "/stats"))
+        assert resp["statusCode"] == 200, resp
+        body = resp["_json"]
+        assert body["total_games"] == 0
+        assert body["total_agents"] == 0
+
+    def test_after_three_games(self, ddb: None) -> None:
+        for _ in range(3):
+            _invoke(_event("POST", "/games", body={}))
+        resp = _invoke(_event("GET", "/stats"))
+        body = resp["_json"]
+        assert body["total_games"] == 3
+        assert body["total_agents"] == 36
+
+
 class TestSnapshot:
     def test_missing_game_returns_404(self, ddb: None) -> None:
         resp = _invoke(
