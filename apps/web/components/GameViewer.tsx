@@ -112,8 +112,17 @@ export function GameViewer({
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [lastEventAt, setLastEventAt] = useState<number>(() => Date.now());
   const [now, setNow] = useState<number>(() => Date.now());
+  const [moveError, setMoveError] = useState<string | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const lastTurnCountRef = useRef(0);
+
+  // Extract ?play=TOKEN from the URL — the human player's browser bearer.
+  // Spectators (with only the watch URL) won't have it.
+  const playToken = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const token = new URLSearchParams(window.location.search).get("play");
+    return token && token.length >= 32 ? token : null;
+  }, []);
 
   // Tick `now` once per second so the "last event N ago" indicator updates
   // without forcing a re-render on every poll.
@@ -201,8 +210,91 @@ export function GameViewer({
     secondsSinceEvent > 90 &&
     events.length > 0;
 
+  // Browser-side human move handling. The board is draggable when:
+  //   - the URL has ?play=TOKEN (you are the human)
+  //   - the game is in human_vs_ai mode
+  //   - it's your side's turn
+  //   - the game is ongoing
+  const isHumanGame = initial.mode === "human_vs_ai";
+  const humanPlaysSide = (initial.human_plays ?? null) as
+    | "white"
+    | "black"
+    | null;
+  const humanTurn =
+    isHumanGame && humanPlaysSide !== null && humanPlaysSide === toMove && !ended;
+  const canDrag = !!playToken && humanTurn;
+  const legalMoveSet = useMemo(
+    () => new Set(initial.legal_moves ?? []),
+    [initial.legal_moves],
+  );
+
+  const postHumanMove = async (uci: string) => {
+    try {
+      const r = await fetch(`${apiBase}/games/${initial.id}/move`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${playToken}`,
+        },
+        body: JSON.stringify({
+          move: uci,
+          side: humanPlaysSide,
+          turn,
+        }),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        setMoveError(`Server rejected ${uci}: ${r.status}`);
+        console.error("[chessminds] move failed:", r.status, text);
+        return;
+      }
+      const body = (await r.json()) as { fen_after?: string; status?: string };
+      setMoveError(null);
+      if (body.fen_after) {
+        setSnapshot((s) => ({
+          ...s,
+          fen: body.fen_after!,
+          status: body.status ?? s.status,
+        }));
+      }
+    } catch (err) {
+      setMoveError(err instanceof Error ? err.message : "move failed");
+      console.error("[chessminds] move exception:", err);
+    }
+  };
+
+  const handlePieceDrop = ({
+    sourceSquare,
+    targetSquare,
+  }: {
+    sourceSquare: string;
+    targetSquare: string | null;
+    piece?: unknown;
+  }): boolean => {
+    if (!canDrag || !targetSquare) return false;
+    const base = `${sourceSquare}${targetSquare}`;
+    if (legalMoveSet.has(base)) {
+      void postHumanMove(base);
+      return true;
+    }
+    for (const suffix of ["q", "r", "b", "n"]) {
+      if (legalMoveSet.has(base + suffix)) {
+        void postHumanMove(base + suffix);
+        return true;
+      }
+    }
+    setMoveError(`${base} is not a legal move`);
+    return false;
+  };
+
+  useEffect(() => {
+    if (!moveError) return;
+    const t = setTimeout(() => setMoveError(null), 4000);
+    return () => clearTimeout(t);
+  }, [moveError]);
+
   return (
-    <main className="mx-auto flex max-w-[1400px] flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6">
+    <main className="mx-auto flex max-w-[1400px] flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6 xl:max-w-[1600px] 2xl:max-w-[1920px]">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4 text-sm">
           <span className="font-serif-display text-base">Chess of Minds</span>
@@ -221,25 +313,41 @@ export function GameViewer({
       </header>
 
       <div className="flex flex-col gap-5 lg:flex-row lg:gap-6">
-        <section className="flex-1 grid grid-cols-1 gap-4 md:grid-cols-[minmax(230px,260px)_minmax(0,1fr)_minmax(230px,260px)] md:gap-5">
+        <section className="flex-1 grid grid-cols-1 gap-4 md:grid-cols-[minmax(230px,260px)_minmax(0,1fr)_minmax(230px,260px)] md:gap-5 xl:grid-cols-[minmax(260px,300px)_minmax(0,1fr)_minmax(260px,300px)] 2xl:grid-cols-[minmax(300px,340px)_minmax(0,1fr)_minmax(300px,340px)]">
           <AgentColumn
             side="black"
             agents={agents.black}
             active={toMove === "black" && !ended}
             isHuman={initial.mode === "human_vs_ai" && initial.human_plays === "black"}
           />
-          <div className="mx-auto flex w-full max-w-[600px] flex-col gap-3">
+          <div className="mx-auto flex w-full max-w-[600px] flex-col gap-3 xl:max-w-[680px] 2xl:max-w-[760px]">
+            {canDrag && (
+              <div className="rounded-md border border-indigo-500/30 bg-indigo-500/5 px-3 py-2 text-center text-xs text-indigo-600 dark:text-indigo-400">
+                Your turn — drag any {humanPlaysSide} piece to move.
+              </div>
+            )}
+            {playToken && !canDrag && snapshot.status === "ongoing" && !humanTurn && (
+              <div className="rounded-md border border-ink/15 bg-paper/60 px-3 py-2 text-center text-xs text-ink/60 dark:border-paper/20 dark:bg-ink/40 dark:text-paper/60">
+                Waiting for the {toMove} agents to deliberate…
+              </div>
+            )}
             <div className="overflow-hidden rounded-xl border border-ink/10 shadow-sm dark:border-paper/10">
               <Chessboard
                 options={{
                   position: snapshot.fen,
-                  allowDragging: false,
+                  allowDragging: canDrag,
                   boardOrientation:
-                    initial.human_plays === "black" ? "black" : "white",
+                    humanPlaysSide === "black" ? "black" : "white",
                   id: `cm-${initial.id}`,
+                  onPieceDrop: handlePieceDrop,
                 }}
               />
             </div>
+            {moveError && (
+              <div className="rounded-md border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-center text-xs text-rose-600">
+                {moveError}
+              </div>
+            )}
             <span className="truncate text-center font-mono-block text-[11px] text-ink/50 dark:text-paper/50">
               {snapshot.fen}
             </span>
@@ -254,7 +362,9 @@ export function GameViewer({
 
         <aside
           className={`flex flex-col overflow-hidden rounded-xl border border-ink/10 bg-ink/[0.02] transition-[width] duration-300 dark:border-paper/10 dark:bg-paper/[0.02] lg:self-stretch ${
-            timelineOpen ? "lg:w-[380px]" : "lg:w-[48px]"
+            timelineOpen
+              ? "lg:w-[380px] xl:w-[440px] 2xl:w-[480px]"
+              : "lg:w-[48px]"
           }`}
         >
           <TimelineHeader

@@ -222,3 +222,7 @@ class CreateGameResponse(BaseModel):
     watch_url: str
     ingest_token: str = Field(min_length=32)
     ttl_seconds: int = Field(gt=0)
+    # Populated only when config.mode == human_vs_ai. The browser opens
+    # play_url and uses human_token as bearer on POST /move.
+    play_url: str | None = None
+    human_token: str | None = None

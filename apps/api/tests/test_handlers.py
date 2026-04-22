@@ -133,6 +133,83 @@ class TestCreateGame:
         assert resp["statusCode"] == 400, resp
 
 
+class TestHumanToken:
+    def test_ai_vs_ai_has_no_play_url(self, ddb: None) -> None:
+        body = _invoke(_event("POST", "/games", body={}))["_json"]
+        assert body.get("play_url") is None
+        assert body.get("human_token") is None
+
+    def test_human_vs_ai_returns_play_url_and_token(self, ddb: None) -> None:
+        body = _invoke(
+            _event(
+                "POST",
+                "/games",
+                body={"config": {"mode": "human_vs_ai", "human_plays": "white"}},
+            )
+        )["_json"]
+        assert isinstance(body["play_url"], str)
+        assert body["play_url"].endswith(f"?play={body['human_token']}")
+        assert len(body["human_token"]) >= 32
+        assert body["ingest_token"] != body["human_token"]
+
+    def test_human_token_can_play_its_side(self, ddb: None) -> None:
+        created = _invoke(
+            _event(
+                "POST",
+                "/games",
+                body={"config": {"mode": "human_vs_ai", "human_plays": "white"}},
+            )
+        )["_json"]
+        resp = _invoke(
+            _event(
+                "POST",
+                f"/games/{created['id']}/move",
+                body={"move": "e2e4", "side": "white", "turn": 1},
+                headers={"authorization": f"Bearer {created['human_token']}"},
+                path_parameters={"id": created["id"]},
+            )
+        )
+        assert resp["statusCode"] == 200, resp
+
+    def test_human_token_rejects_opponent_side(self, ddb: None) -> None:
+        created = _invoke(
+            _event(
+                "POST",
+                "/games",
+                body={"config": {"mode": "human_vs_ai", "human_plays": "white"}},
+            )
+        )["_json"]
+        resp = _invoke(
+            _event(
+                "POST",
+                f"/games/{created['id']}/move",
+                body={"move": "e7e5", "side": "black", "turn": 1},
+                headers={"authorization": f"Bearer {created['human_token']}"},
+                path_parameters={"id": created["id"]},
+            )
+        )
+        assert resp["statusCode"] == 401, resp
+
+    def test_ingest_token_still_works_in_1p_games(self, ddb: None) -> None:
+        created = _invoke(
+            _event(
+                "POST",
+                "/games",
+                body={"config": {"mode": "human_vs_ai", "human_plays": "black"}},
+            )
+        )["_json"]
+        resp = _invoke(
+            _event(
+                "POST",
+                f"/games/{created['id']}/move",
+                body={"move": "e2e4", "side": "white", "turn": 1},
+                headers={"authorization": f"Bearer {created['ingest_token']}"},
+                path_parameters={"id": created["id"]},
+            )
+        )
+        assert resp["statusCode"] == 200, resp
+
+
 class TestModeField:
     def test_default_mode_is_ai_vs_ai(self, ddb: None) -> None:
         created = _invoke(_event("POST", "/games", body={}))["_json"]

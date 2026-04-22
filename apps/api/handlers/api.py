@@ -65,14 +65,19 @@ def _ttl_seconds() -> int:
 # --- helpers ----------------------------------------------------------------------
 
 
-def _require_bearer(repo: GameRepo, game_id: str) -> None:
+def _require_bearer(repo: GameRepo, game_id: str, *, allow_human: bool = False) -> str:
+    """Validate Authorization bearer. Returns "ingest" or "human" (the latter
+    only when allow_human=True). Raises HTTP errors on failure."""
     headers = {k.lower(): v for k, v in (app.current_event.headers or {}).items()}
     auth = headers.get("authorization", "")
     if not auth.lower().startswith("bearer "):
         raise UnauthorizedError("missing bearer token")
     token = auth.split(" ", 1)[1].strip()
     try:
+        if allow_human:
+            return repo.verify_any_token(game_id, token)
         repo.verify_token(game_id, token)
+        return "ingest"
     except GameNotFoundError as e:
         raise NotFoundError(f"game {game_id!r} not found") from e
     except IngestTokenMismatchError as e:
@@ -99,6 +104,17 @@ def create_game() -> Response:
     watch = _watch_url(game_id)
     ttl = _ttl_seconds()
 
+    # Separate browser-side token for the human player in 1P mode.
+    # Returned inside play_url; accepted on POST /move alongside the
+    # orchestrator's ingest_token.
+    mode_obj_for_token = getattr(req.config, "mode", None)
+    mode_val = getattr(mode_obj_for_token, "value", None) or (mode_obj_for_token or "ai_vs_ai")
+    human_token: str | None = None
+    play_url: str | None = None
+    if mode_val == "human_vs_ai":
+        human_token = secrets.token_urlsafe(32)
+        play_url = f"{watch}?play={human_token}"
+
     repo = _repo()
     repo.put_game(
         game_id=game_id,
@@ -107,6 +123,7 @@ def create_game() -> Response:
         ingest_token=ingest_token,
         starting_fen=starting_fen(),
         ttl_seconds=ttl,
+        human_token=human_token,
     )
     # Record a GAME_CREATED event so the stream has a head to tail from.
     repo.put_event(
@@ -145,7 +162,9 @@ def create_game() -> Response:
         watch_url=watch,
         ingest_token=ingest_token,
         ttl_seconds=ttl,
-    ).model_dump()
+        play_url=play_url,
+        human_token=human_token,
+    ).model_dump(exclude_none=True)
     return Response(
         status_code=201,
         content_type="application/json",
@@ -223,7 +242,9 @@ def append_event(game_id: str) -> Response:
 @app.post("/games/<game_id>/move")
 def play_move(game_id: str) -> Response:
     repo = _repo()
-    _require_bearer(repo, game_id)
+    # /move accepts either the orchestrator's ingest token or the human's
+    # play token. A human token may only move its own side.
+    token_kind = _require_bearer(repo, game_id, allow_human=True)
 
     body = _json_body()
     move = body.get("move")
@@ -231,6 +252,17 @@ def play_move(game_id: str) -> Response:
     turn = body.get("turn", 0)
     if not move or side not in {"white", "black"}:
         raise BadRequestError("body must include 'move' (UCI) and 'side' ('white'|'black')")
+
+    if token_kind == "human":
+        game_pre = repo.get_game(game_id)
+        if game_pre is None:
+            raise NotFoundError(f"game {game_id!r} not found")
+        config = json.loads(game_pre.config_json)
+        human_plays = config.get("human_plays")
+        if human_plays != side:
+            raise UnauthorizedError(
+                f"human token may only play side {human_plays!r}, not {side!r}"
+            )
 
     game = repo.get_game(game_id)
     if game is None:

@@ -104,23 +104,27 @@ class GameRepo:
         ingest_token: str,
         starting_fen: str,
         ttl_seconds: int,
+        human_token: str | None = None,
     ) -> None:
         now = int(time.time())
+        item: dict[str, Any] = {
+            "pk": _pk(game_id),
+            "sk": "META",
+            "game_id": game_id,
+            "config_json": config_json,
+            "watch_url": watch_url,
+            "token_hash": _hash_token(ingest_token),
+            "current_fen": starting_fen,
+            "status": "ongoing",
+            "next_seq": 0,
+            "created_at": now,
+            "expires_at": now + ttl_seconds,
+        }
+        if human_token is not None:
+            item["human_token_hash"] = _hash_token(human_token)
         try:
             self._table.put_item(
-                Item={
-                    "pk": _pk(game_id),
-                    "sk": "META",
-                    "game_id": game_id,
-                    "config_json": config_json,
-                    "watch_url": watch_url,
-                    "token_hash": _hash_token(ingest_token),
-                    "current_fen": starting_fen,
-                    "status": "ongoing",
-                    "next_seq": 0,
-                    "created_at": now,
-                    "expires_at": now + ttl_seconds,
-                },
+                Item=item,
                 ConditionExpression="attribute_not_exists(pk)",
             )
         except ClientError as e:
@@ -154,6 +158,26 @@ class GameRepo:
             raise GameNotFoundError(game_id)
         if not hmac.compare_digest(item["token_hash"], _hash_token(ingest_token)):
             raise IngestTokenMismatchError(game_id)
+
+    def verify_any_token(self, game_id: str, bearer: str) -> str:
+        """Accept either the orchestrator's ingest token OR the human's
+        play token. Returns "ingest" or "human" identifying which matched.
+        Raises GameNotFoundError or IngestTokenMismatchError on failure.
+        """
+        resp = self._table.get_item(
+            Key={"pk": _pk(game_id), "sk": "META"},
+            ProjectionExpression="token_hash, human_token_hash",
+        )
+        item = resp.get("Item")
+        if item is None:
+            raise GameNotFoundError(game_id)
+        candidate = _hash_token(bearer)
+        if hmac.compare_digest(item.get("token_hash", ""), candidate):
+            return "ingest"
+        human_hash = item.get("human_token_hash")
+        if human_hash and hmac.compare_digest(human_hash, candidate):
+            return "human"
+        raise IngestTokenMismatchError(game_id)
 
     # --- events ------------------------------------------------------------------
 

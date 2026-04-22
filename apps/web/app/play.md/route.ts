@@ -150,17 +150,37 @@ The response is:
 }
 \`\`\`
 
-Save \`id\`, \`watch_url\`, and \`ingest_token\` for the rest of the session. The token is your write-capability — use it as \`Authorization: Bearer {ingest_token}\` on every write endpoint.
+When \`mode == "human_vs_ai"\`, the response also includes:
 
-## 2. Surface the watch URL to the human
+\`\`\`json
+{
+  "play_url": "${SITE}/game/abc123?play=...",
+  "human_token": "..."
+}
+\`\`\`
 
-As soon as you have \`watch_url\`, print a message to the user that looks like:
+\`play_url\` is the URL the human opens in their browser. It embeds a private \`play\` token in the query string so the page can POST the human's moves directly. \`human_token\` is the same token, broken out for convenience. Keep both private.
+
+Save \`id\`, \`watch_url\`, and \`ingest_token\` (and \`play_url\` if 1P) for the rest of the session. The ingest token is your write-capability — use it as \`Authorization: Bearer {ingest_token}\` on every write endpoint.
+
+## 2. Surface the URL(s) to the human
+
+As soon as you have \`watch_url\`, print a message to the user.
+
+**AI vs AI** (one URL):
 
 > 🎭 Your game is live at: \`{watch_url}\`
 >
 > Share this URL with friends. Watch it unfold in real time. I'll start playing turns now.
 
-**Do NOT wait for the user to respond.** Immediately continue to Section 3 in the same assistant turn or the next one. The whole point of the product is that once the URL is printed, the game plays itself. If you stop here, the user sees a frozen "Game begins" on the viewer and thinks the app is broken.
+**Human vs AI** (two URLs — keep the play URL private):
+
+> 🎭 Watch (public): \`{watch_url}\`
+> ♟  Play your moves (private — don't share): \`{play_url}\`
+>
+> Open the play URL in a browser. Drag your pieces when it's your turn. I'll orchestrate the AI side.
+
+**Do NOT wait for the user to respond.** Immediately continue to Section 3 in the same assistant turn or the next one. The whole point of the product is that once the URL(s) are printed, the game plays itself. If you stop here, the user sees a frozen "Game begins" on the viewer and thinks the app is broken.
 
 ## 3. The turn loop
 
@@ -176,23 +196,24 @@ Returns \`{fen, status, side_to_move, legal_moves, config, mode, human_plays, ev
 
 **3a.1. Branch: is this the human's turn?**
 
-If \`mode == "human_vs_ai"\` AND \`side_to_move == human_plays\`, skip the sub-agent dance entirely — the human plays this move. Handle it like this:
+If \`mode == "human_vs_ai"\` AND \`side_to_move == human_plays\`, the human plays this move **from their browser**. The \`play_url\` you printed in Section 2 enables drag-drop on the chessboard; the browser POSTs \`/move\` directly using the human token.
 
-1. POST a \`TURN_STARTED\` event: \`{"type":"TURN_STARTED","turn":N,"side":"white|black","player":"human"}\`.
-2. Ask the user in plain prose. Example message:
-   > **Turn N — your move.** You play {white|black}.
-   > Position (FEN): \`{fen}\`
-   > A few of your legal moves: \`{first-10 of legal_moves joined}\` ({legal_moves.length} total).
-   > What's your move? Paste UCI (e.g. \`e2e4\`) or SAN (\`e4\`, \`Nf3\`).
-3. Parse their answer:
-   - If UCI matches \`legal_moves\`, use it directly.
-   - If SAN, expand it by matching piece + destination against \`legal_moves\`. (Your own SAN→UCI conversion. Watch for disambiguation like \`Nbd2\`.)
-   - If neither matches, respond "That move isn't legal here. Legal options: {full list}. Try again." and re-prompt.
-4. Once you have a valid UCI: POST \`${API}/games/{id}/move\` with \`{"move": uci, "side": <side>, "turn": N}\`.
-5. Optionally POST a custom \`HUMAN_MOVE\` event with a snippet like \`"You played <san>."\` for the viewer feed.
-6. Skip steps 3b–3f for this turn. Go to 3g (reactions are optional here). Then continue the outer loop for the AI's turn.
+You do NOT prompt the user in chat. You do NOT parse SAN. You do not touch \`/move\` for this turn. Instead:
 
-Only if it's NOT the human's turn, proceed to 3b.
+1. (Optional) POST a \`TURN_STARTED\` event so the viewer shows "your turn" clearly: \`{"type":"TURN_STARTED","turn":N,"side":"{side}","player":"human"}\`.
+2. Wait for the human to play by polling the snapshot every 3-5 seconds:
+   \`\`\`
+   while True:
+     sleep 4
+     snap = GET ${API}/games/{id}
+     if snap.status != "ongoing": break  # game ended
+     if snap.side_to_move != human_plays: break  # they played; FEN advanced
+   \`\`\`
+3. Once the loop exits, continue the outer turn loop. It will now be the AI's turn.
+
+**Do not time out the wait** — the human may take several minutes. The game TTL is 7 days; patience is fine. If you want to be polite, after ~5 minutes of waiting you can print a single reminder: "Still your move, {side}." But do not re-ask for the move in chat.
+
+If \`mode != "human_vs_ai"\` OR \`side_to_move != human_plays\`, it's the AI's turn — proceed to 3b.
 
 **3b. Bucket legal moves by piece-group**
 
