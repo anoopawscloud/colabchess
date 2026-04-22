@@ -33,6 +33,11 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 def ddb() -> Iterator[None]:
     with mock_aws():
         create_table(TABLE, region=REGION)
+        # Stats endpoint has an in-process cache; reset it between tests so
+        # one test's 0-count doesn't survive into the next test's assertions.
+        from handlers import api as _api
+
+        _api._stats_cache.clear()
         yield
 
 
@@ -302,6 +307,64 @@ class TestAppendEvent:
         # create_game itself writes a GAME_CREATED event at seq=1, so the first
         # client-written event lands at seq=2.
         assert r1["_json"]["seq"] == 2
+
+    def test_rejects_oversized_event(self, ddb: None) -> None:
+        """A caller cannot push an event large enough to threaten the DDB
+        400KB item ceiling. 60KB is above our 50KB cap."""
+        created = _invoke(_event("POST", "/games", body={}))["_json"]
+        gid = created["id"]
+        tok = created["ingest_token"]
+        resp = _invoke(
+            _event(
+                "POST",
+                f"/games/{gid}/events",
+                body={"type": "PROPOSAL", "blob": "A" * 60_000},
+                headers={"authorization": f"Bearer {tok}"},
+                path_parameters={"id": gid},
+            )
+        )
+        assert resp["statusCode"] == 400, resp
+
+    def test_reserved_fields_cannot_be_overwritten(self, ddb: None) -> None:
+        """Caller-supplied seq / expires_at / pk / sk are stripped before
+        writing the event row. The real seq is the server-assigned one."""
+        created = _invoke(_event("POST", "/games", body={}))["_json"]
+        gid = created["id"]
+        tok = created["ingest_token"]
+        resp = _invoke(
+            _event(
+                "POST",
+                f"/games/{gid}/events",
+                body={
+                    "type": "PROPOSAL",
+                    "turn": 1,
+                    "side": "white",
+                    "agent": "x",
+                    "proposal": {
+                        "proposed_move": "e2e4",
+                        "reasoning": "",
+                        "public_statement": "",
+                        "confidence": 50,
+                    },
+                    # Hostile: try to clobber reserved keys.
+                    "seq": 99999999,
+                    "expires_at": 0,
+                    "pk": "GAME#attacker",
+                    "sk": "META",
+                },
+                headers={"authorization": f"Bearer {tok}"},
+                path_parameters={"id": gid},
+            )
+        )
+        assert resp["statusCode"] == 201, resp
+        # Server must have assigned its own seq (2 = after GAME_CREATED), not
+        # accepted the attacker's 99999999.
+        assert resp["_json"]["seq"] == 2
+        # And the event must be readable via the normal poll (i.e. sk was
+        # not diverted to "META" or anywhere unreachable).
+        snap = _invoke(_event("GET", f"/games/{gid}", path_parameters={"id": gid}))
+        seqs = [e["seq"] for e in snap["_json"]["events"]]
+        assert 2 in seqs and 99999999 not in seqs
 
 
 class TestPlayMove:

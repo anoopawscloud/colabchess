@@ -95,6 +95,16 @@ export class ChessMindsStack extends cdk.Stack {
       integration: apiIntegration,
     });
 
+    // Stage-level throttling on the default stage. HTTP APIs don't support
+    // per-route throttles in CDK L2 without WAF, so we cap the whole API.
+    // 50 req/s sustained with a 100 burst is ~10x steady-state for our
+    // expected traffic and blunts cost-DoS and scrape-all attempts.
+    const defaultStage = httpApi.defaultStage!.node.defaultChild as apigw.CfnStage;
+    defaultStage.defaultRouteSettings = {
+      throttlingBurstLimit: 100,
+      throttlingRateLimit: 50,
+    };
+
     new cdk.CfnOutput(this, "ApiUrl", { value: httpApi.apiEndpoint });
     new cdk.CfnOutput(this, "GameTableName", { value: gameTable.tableName });
   }

@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import secrets
+import time
 
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver, Response
 from aws_lambda_powertools.event_handler.exceptions import (
@@ -41,6 +42,17 @@ from lib.db import (
 app = APIGatewayHttpResolver()
 _analytics_logger = logging.getLogger("chessminds.analytics")
 _analytics_logger.setLevel(logging.INFO)
+
+# Each DDB item is capped at 400KB; our pk/sk/seq/expires_at overhead is small
+# so we give the caller a comfortable 50KB window. Anything larger is a bug or
+# an attempt to push the item toward the DynamoDB ceiling.
+MAX_EVENT_BYTES = 50_000
+
+# In-process cache for /stats. Lambda instance reuse means a warm container
+# can serve N requests per cold start; caching the scan here keeps DDB spend
+# linear in time, not in request count. 30s matches the client Cache-Control.
+_STATS_TTL_SECONDS = 30.0
+_stats_cache: dict[str, tuple[float, int]] = {}
 
 
 # --- config from env ---------------------------------------------------------------
@@ -156,30 +168,37 @@ def stats() -> Response:
     Returns {total_games, total_agents}. Each game has 12 piece-agents (6
     per side in grouped topology), so total_agents = total_games * 12.
     """
-    import boto3
+    table = os.environ["GAME_TABLE"]
+    now = time.time()
+    cached = _stats_cache.get(table)
+    if cached is not None and now - cached[0] < _STATS_TTL_SECONDS:
+        total = cached[1]
+    else:
+        import boto3
 
-    client = boto3.client(
-        "dynamodb",
-        region_name=os.environ.get("AWS_REGION")
-        or os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
-    )
-    # Scan-and-filter for META rows. For a short TTL (7 days) and expected
-    # volume, this is fine. If the table grows past ~10k items, move this to
-    # a GSI on created_at.
-    total = 0
-    kwargs = {
-        "TableName": os.environ["GAME_TABLE"],
-        "FilterExpression": "sk = :sk",
-        "ExpressionAttributeValues": {":sk": {"S": "META"}},
-        "Select": "COUNT",
-    }
-    while True:
-        resp = client.scan(**kwargs)
-        total += resp.get("Count", 0)
-        lek = resp.get("LastEvaluatedKey")
-        if not lek:
-            break
-        kwargs["ExclusiveStartKey"] = lek
+        client = boto3.client(
+            "dynamodb",
+            region_name=os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+        )
+        # Scan-and-filter for META rows. For a short TTL (7 days) and expected
+        # volume, this is fine. If the table grows past ~10k items, move this to
+        # a GSI on created_at.
+        total = 0
+        kwargs = {
+            "TableName": table,
+            "FilterExpression": "sk = :sk",
+            "ExpressionAttributeValues": {":sk": {"S": "META"}},
+            "Select": "COUNT",
+        }
+        while True:
+            resp = client.scan(**kwargs)
+            total += resp.get("Count", 0)
+            lek = resp.get("LastEvaluatedKey")
+            if not lek:
+                break
+            kwargs["ExclusiveStartKey"] = lek
+        _stats_cache[table] = (now, total)
 
     return Response(
         status_code=200,
@@ -244,6 +263,10 @@ def append_event(game_id: str) -> Response:
     body = _json_body()
     if "type" not in body:
         raise BadRequestError("event 'type' is required")
+    # Defence-in-depth against a caller trying to push an item toward the
+    # 400KB DDB limit. Legitimate events are well under 10KB.
+    if len(json.dumps(body)) > MAX_EVENT_BYTES:
+        raise BadRequestError(f"event exceeds {MAX_EVENT_BYTES} bytes")
 
     seq = repo.put_event(game_id, body)
     return Response(
