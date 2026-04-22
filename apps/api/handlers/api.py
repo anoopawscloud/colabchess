@@ -54,7 +54,7 @@ def _repo() -> GameRepo:
 
 
 def _watch_url(game_id: str) -> str:
-    base = os.environ.get("WATCH_URL_BASE", "https://chessminds-psi.vercel.app/game")
+    base = os.environ.get("WATCH_URL_BASE", "https://chessminds.fun/game")
     return f"{base}/{game_id}"
 
 
@@ -146,6 +146,46 @@ def create_game() -> Response:
         status_code=201,
         content_type="application/json",
         body=json.dumps(body),
+    )
+
+
+@app.get("/stats")
+def stats() -> Response:
+    """Public aggregate counters for the landing page. Cached client-side.
+
+    Returns {total_games, total_agents}. Each game has 12 piece-agents (6
+    per side in grouped topology), so total_agents = total_games * 12.
+    """
+    import boto3
+
+    client = boto3.client(
+        "dynamodb",
+        region_name=os.environ.get("AWS_REGION")
+        or os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+    )
+    # Scan-and-filter for META rows. For a short TTL (7 days) and expected
+    # volume, this is fine. If the table grows past ~10k items, move this to
+    # a GSI on created_at.
+    total = 0
+    kwargs = {
+        "TableName": os.environ["GAME_TABLE"],
+        "FilterExpression": "sk = :sk",
+        "ExpressionAttributeValues": {":sk": {"S": "META"}},
+        "Select": "COUNT",
+    }
+    while True:
+        resp = client.scan(**kwargs)
+        total += resp.get("Count", 0)
+        lek = resp.get("LastEvaluatedKey")
+        if not lek:
+            break
+        kwargs["ExclusiveStartKey"] = lek
+
+    return Response(
+        status_code=200,
+        content_type="application/json",
+        headers={"cache-control": "public, max-age=30, s-maxage=30"},
+        body=json.dumps({"total_games": total, "total_agents": total * 12}),
     )
 
 
