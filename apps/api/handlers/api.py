@@ -120,15 +120,11 @@ def create_game() -> Response:
 
     # Structured analytics event. Query in CloudWatch Logs Insights with:
     #   fields @timestamp, @message | filter @message like /"event":"game_started"/
-    mode_obj = getattr(req.config, "mode", None)
-    mode_str = mode_obj.value if hasattr(mode_obj, "value") else (mode_obj or "ai_vs_ai")
     _analytics_logger.info(
         json.dumps(
             {
                 "event": "game_started",
                 "game_id": game_id,
-                "mode": mode_str,
-                "human_plays": getattr(req.config, "human_plays", None),
                 "white_strategy": req.config.white.negotiation_strategy.value,
                 "black_strategy": req.config.black.negotiation_strategy.value,
                 "white_preset": req.config.white.personality_preset.value,
@@ -165,16 +161,13 @@ def snapshot(game_id: str) -> Response:
         legal_moves_uci(game.current_fen) if game.status == "ongoing" else []
     )
     side_to_move = game.current_fen.split(" ")[1] if " " in game.current_fen else "w"
-    config = json.loads(game.config_json)
     body = {
         "id": game.game_id,
         "fen": game.current_fen,
         "status": game.status,
         "side_to_move": "white" if side_to_move == "w" else "black",
         "legal_moves": legal_moves,
-        "config": config,
-        "mode": config.get("mode", "ai_vs_ai"),
-        "human_plays": config.get("human_plays"),
+        "config": json.loads(game.config_json),
         "next_seq": game.next_seq,
         "events": events,
     }

@@ -212,7 +212,6 @@ export function GameViewer({
         </div>
         <div className="flex flex-wrap items-center gap-3 text-xs">
           <StatusPill status={snapshot.status} toMove={toMove} />
-          <ModePill mode={initial.mode} humanPlays={initial.human_plays} />
           <ConnPill state={conn} error={lastError} />
           <span className="font-mono-block text-ink/50 dark:text-paper/50">
             turn {turn}
@@ -226,16 +225,14 @@ export function GameViewer({
             side="black"
             agents={agents.black}
             active={toMove === "black" && !ended}
-            isHuman={initial.mode === "human_vs_ai" && initial.human_plays === "black"}
           />
-          <div className="mx-auto flex w-full max-w-[600px] flex-col gap-3">
+          <div className="mx-auto flex w-full max-w-[600px] flex-col gap-3 xl:max-w-[680px] 2xl:max-w-[760px]">
             <div className="overflow-hidden rounded-xl border border-ink/10 shadow-sm dark:border-paper/10">
               <Chessboard
                 options={{
                   position: snapshot.fen,
                   allowDragging: false,
-                  boardOrientation:
-                    initial.human_plays === "black" ? "black" : "white",
+                  boardOrientation: "white",
                   id: `cm-${initial.id}`,
                 }}
               />
@@ -248,7 +245,6 @@ export function GameViewer({
             side="white"
             agents={agents.white}
             active={toMove === "white" && !ended}
-            isHuman={initial.mode === "human_vs_ai" && initial.human_plays === "white"}
           />
         </section>
 
@@ -299,27 +295,6 @@ export function GameViewer({
         </aside>
       </div>
     </main>
-  );
-}
-
-function ModePill({
-  mode,
-  humanPlays,
-}: {
-  mode?: "ai_vs_ai" | "human_vs_ai";
-  humanPlays?: "white" | "black" | null;
-}) {
-  if (!mode || mode === "ai_vs_ai") {
-    return (
-      <span className="font-mono-block hidden rounded-full bg-ink/10 px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-ink/60 dark:bg-paper/10 dark:text-paper/60 sm:inline-flex">
-        AI vs AI
-      </span>
-    );
-  }
-  return (
-    <span className="font-mono-block inline-flex items-center gap-1 rounded-full bg-indigo-500/10 px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-indigo-600 dark:text-indigo-400">
-      you play {humanPlays}
-    </span>
   );
 }
 
@@ -418,47 +393,26 @@ function AgentColumn({
   side,
   agents,
   active,
-  isHuman,
 }: {
   side: Side;
   agents: Record<Role, AgentState>;
   active: boolean;
-  isHuman: boolean;
 }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between px-1">
-        <div className="flex items-center gap-2">
-          <span className="font-serif-display text-sm uppercase tracking-[0.2em]">
-            {side}
-          </span>
-          {isHuman && (
-            <span className="font-mono-block rounded-full bg-indigo-500/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-indigo-600 dark:text-indigo-400">
-              human
-            </span>
-          )}
-        </div>
+        <span className="font-serif-display text-sm uppercase tracking-[0.2em]">
+          {side}
+        </span>
         {active && (
           <span className="font-mono-block text-[11px] text-ember">to move</span>
         )}
       </div>
-      {isHuman ? (
-        <div className="rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-4 text-xs text-ink/70 dark:text-paper/70">
-          <p className="font-serif-display text-base text-ink dark:text-paper">
-            You control the {side} side.
-          </p>
-          <p className="mt-1">
-            The orchestrator prompts you for each move in your Claude Code
-            session. This side has no piece-agents.
-          </p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {ROLES.map((role) => (
-            <AgentCard key={role} agent={agents[role]} />
-          ))}
-        </div>
-      )}
+      <div className="flex flex-col gap-2">
+        {ROLES.map((role) => (
+          <AgentCard key={role} agent={agents[role]} />
+        ))}
+      </div>
     </div>
   );
 }

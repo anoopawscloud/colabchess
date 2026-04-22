@@ -10,7 +10,7 @@ import re
 from enum import Enum
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 
 
 UCI_RE = re.compile(r"^[a-h][1-8][a-h][1-8][qrbn]?$")
@@ -50,11 +50,6 @@ class StockfishMode(str, Enum):
     OFF = "off"
     ADVISORY = "advisory"
     REQUIRED = "required"
-
-
-class GameMode(str, Enum):
-    AI_VS_AI = "ai_vs_ai"
-    HUMAN_VS_AI = "human_vs_ai"
 
 
 class EventType(str, Enum):
@@ -102,16 +97,6 @@ class Config(BaseModel):
     white: SideConfig = Field(default_factory=SideConfig)
     black: SideConfig = Field(default_factory=SideConfig)
     max_turns: int = Field(default=150, ge=1, le=500)
-    mode: GameMode = GameMode.AI_VS_AI
-    human_plays: Literal["white", "black"] | None = None
-
-    @model_validator(mode="after")
-    def _check_mode_consistency(self) -> "Config":
-        if self.mode == GameMode.HUMAN_VS_AI and self.human_plays is None:
-            raise ValueError(
-                "human_plays must be 'white' or 'black' when mode='human_vs_ai'"
-            )
-        return self
 
 
 # --- Events (discriminated union) -------------------------------------------------
