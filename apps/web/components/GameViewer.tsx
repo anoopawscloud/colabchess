@@ -13,8 +13,11 @@ import {
 } from "@/lib/agents";
 import type { BaseEvent, Snapshot } from "@/lib/types";
 import { isMoveType, normalizeMove, normalizeProposal } from "@/lib/events";
+import { groupIntoTurns, auctionWinner, type Turn } from "@/lib/turns";
+import { NegotiationBars, type BarDatum } from "./NegotiationBars";
 
 type Side = "white" | "black";
+type ConnState = "connecting" | "live" | "error";
 
 interface AgentState {
   role: Role;
@@ -59,18 +62,23 @@ function deriveAgents(events: BaseEvent[]): Record<Side, Record<Role, AgentState
         };
       }
     } else if (e.type === "REACTION") {
-      const side = (e as any).side as Side;
-      const agent = ((e as any).agent ?? (e as any).group) as string;
+      const side = (e as Record<string, unknown>).side as Side;
+      const agent = (((e as Record<string, unknown>).agent ??
+        (e as Record<string, unknown>).group) as string) || "";
       if ((side === "white" || side === "black") && isRole(agent)) {
-        out[side][agent].lastStatement = (e as any).public_statement ?? out[side][agent].lastStatement;
+        out[side][agent].lastStatement =
+          ((e as Record<string, unknown>).public_statement as string) ??
+          out[side][agent].lastStatement;
       }
     } else if (isMoveType(e.type)) {
       for (const r of ROLES) {
-        out.white[r].status = out.white[r].status === "proposed" ? "done" : out.white[r].status;
-        out.black[r].status = out.black[r].status === "proposed" ? "done" : out.black[r].status;
+        out.white[r].status =
+          out.white[r].status === "proposed" ? "done" : out.white[r].status;
+        out.black[r].status =
+          out.black[r].status === "proposed" ? "done" : out.black[r].status;
       }
     } else if (e.type === "TURN_STARTED") {
-      const side = (e as any).side as Side;
+      const side = (e as Record<string, unknown>).side as Side;
       if (side === "white" || side === "black") {
         for (const r of ROLES) out[side][r].status = "thinking";
       }
@@ -88,8 +96,6 @@ function turnNumber(fen: string): number {
   return parseInt(parts[5] ?? "1", 10);
 }
 
-type ConnState = "connecting" | "live" | "error";
-
 export function GameViewer({
   initial,
   apiBase,
@@ -103,7 +109,18 @@ export function GameViewer({
   const [polling, setPolling] = useState(true);
   const [conn, setConn] = useState<ConnState>("connecting");
   const [lastError, setLastError] = useState<string | null>(null);
-  const feedRef = useRef<HTMLDivElement>(null);
+  const [timelineOpen, setTimelineOpen] = useState(true);
+  const [lastEventAt, setLastEventAt] = useState<number>(() => Date.now());
+  const [now, setNow] = useState<number>(() => Date.now());
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const lastTurnCountRef = useRef(0);
+
+  // Tick `now` once per second so the "last event N ago" indicator updates
+  // without forcing a re-render on every poll.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!polling) return;
@@ -114,9 +131,7 @@ export function GameViewer({
           `${apiBase}/games/${initial.id}/events?since=${cursor}`,
           { cache: "no-store" },
         );
-        if (!r.ok) {
-          throw new Error(`API ${r.status}`);
-        }
+        if (!r.ok) throw new Error(`API ${r.status}`);
         const data = (await r.json()) as {
           events: BaseEvent[];
           next_seq: number;
@@ -128,6 +143,7 @@ export function GameViewer({
         if (data.events?.length) {
           setEvents((prev) => [...prev, ...data.events]);
           setCursor(data.next_seq);
+          setLastEventAt(Date.now());
           const lastMove = [...data.events].reverse().find((e) => e.type === "MOVE");
           if (lastMove && (lastMove as Record<string, unknown>).fen_after) {
             setSnapshot((s) => ({
@@ -145,7 +161,6 @@ export function GameViewer({
         setConn("error");
         const msg = err instanceof Error ? err.message : "unknown error";
         setLastError(msg);
-        // eslint-disable-next-line no-console
         console.error("[chessminds] poll failed:", err);
       }
     };
@@ -157,28 +172,45 @@ export function GameViewer({
     };
   }, [apiBase, cursor, initial.id, polling, snapshot.status]);
 
-  useEffect(() => {
-    feedRef.current?.scrollTo({
-      top: feedRef.current.scrollHeight,
-      behavior: "smooth",
-    });
-  }, [events.length]);
-
+  const grouped = useMemo(() => groupIntoTurns(events), [events]);
   const agents = useMemo(() => deriveAgents(events), [events]);
   const toMove = sideToMove(snapshot.fen);
   const turn = turnNumber(snapshot.fen);
   const ended = snapshot.status !== "ongoing";
 
+  // When a new turn arrives, scroll the timeline to the bottom. We don't scroll
+  // on in-progress updates to the current turn; that would yank the user's view
+  // away from what they're reading.
+  useEffect(() => {
+    if (grouped.turns.length > lastTurnCountRef.current) {
+      lastTurnCountRef.current = grouped.turns.length;
+      timelineRef.current?.scrollTo({
+        top: timelineRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [grouped.turns.length]);
+
+  const secondsSinceEvent = Math.floor((now - lastEventAt) / 1000);
+  const noProgressYet =
+    snapshot.status === "ongoing" &&
+    grouped.turns.length === 0 &&
+    grouped.opening !== undefined;
+  const stalled =
+    snapshot.status === "ongoing" &&
+    secondsSinceEvent > 90 &&
+    events.length > 0;
+
   return (
-    <main className="mx-auto flex min-h-[100svh] max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-10">
-      <header className="flex items-center justify-between">
+    <main className="mx-auto flex max-w-[1400px] flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4 text-sm">
           <span className="font-serif-display text-base">Chess of Minds</span>
           <span className="font-mono-block text-xs text-ink/40 dark:text-paper/40">
             {initial.id}
           </span>
         </div>
-        <div className="flex items-center gap-3 text-xs">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
           <StatusPill status={snapshot.status} toMove={toMove} />
           <ConnPill state={conn} error={lastError} />
           <span className="font-mono-block text-ink/50 dark:text-paper/50">
@@ -187,65 +219,133 @@ export function GameViewer({
         </div>
       </header>
 
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_minmax(0,560px)_1fr]">
-        <AgentColumn side="black" agents={agents.black} active={toMove === "black" && !ended} />
-        <div className="mx-auto w-full max-w-[560px]">
-          <div className="overflow-hidden rounded-xl border border-ink/10 shadow-sm dark:border-paper/10">
-            <Chessboard
-              options={{
-                position: snapshot.fen,
-                allowDragging: false,
-                boardOrientation: "white",
-                id: `cm-${initial.id}`,
-              }}
-            />
+      <div className="flex flex-col gap-5 lg:flex-row lg:gap-6">
+        <section className="flex-1 grid grid-cols-1 gap-4 md:grid-cols-[minmax(230px,260px)_minmax(0,1fr)_minmax(230px,260px)] md:gap-5">
+          <AgentColumn side="black" agents={agents.black} active={toMove === "black" && !ended} />
+          <div className="mx-auto flex w-full max-w-[600px] flex-col gap-3">
+            <div className="overflow-hidden rounded-xl border border-ink/10 shadow-sm dark:border-paper/10">
+              <Chessboard
+                options={{
+                  position: snapshot.fen,
+                  allowDragging: false,
+                  boardOrientation: "white",
+                  id: `cm-${initial.id}`,
+                }}
+              />
+            </div>
+            <span className="truncate text-center font-mono-block text-[11px] text-ink/50 dark:text-paper/50">
+              {snapshot.fen}
+            </span>
           </div>
-          <div className="mt-3 flex items-center justify-between text-xs text-ink/50 dark:text-paper/50">
-            <span className="font-mono-block truncate">{snapshot.fen}</span>
-          </div>
-        </div>
-        <AgentColumn side="white" agents={agents.white} active={toMove === "white" && !ended} />
-      </section>
+          <AgentColumn side="white" agents={agents.white} active={toMove === "white" && !ended} />
+        </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xs uppercase tracking-[0.18em] text-ink/50 dark:text-paper/50">
-          Negotiation feed
-        </h2>
-        <div
-          ref={feedRef}
-          className="max-h-[420px] overflow-y-auto rounded-xl border border-ink/10 bg-ink/[0.02] px-5 py-4 dark:border-paper/10 dark:bg-paper/[0.02]"
+        <aside
+          className={`flex flex-col overflow-hidden rounded-xl border border-ink/10 bg-ink/[0.02] transition-[width] duration-300 dark:border-paper/10 dark:bg-paper/[0.02] lg:self-stretch ${
+            timelineOpen ? "lg:w-[380px]" : "lg:w-[48px]"
+          }`}
         >
-          {events.length === 0 ? (
-            <p className="text-sm text-ink/50 dark:text-paper/50">
-              Waiting for the first event…
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-4">
-              <AnimatePresence initial={false}>
-                {events.map((e) => (
-                  <EventRow key={e.seq} event={e} />
-                ))}
-              </AnimatePresence>
-            </ul>
+          <TimelineHeader
+            open={timelineOpen}
+            onToggle={() => setTimelineOpen((v) => !v)}
+            turnCount={grouped.turns.length}
+            eventCount={events.length}
+          />
+          <div
+            ref={timelineRef}
+            className={`flex flex-col gap-3 overflow-y-auto px-4 pb-4 lg:flex-1 ${
+              timelineOpen ? "" : "hidden lg:hidden"
+            }`}
+          >
+            {grouped.opening && <OpeningBanner event={grouped.opening} />}
+            {grouped.turns.length === 0 && !grouped.opening && (
+              <p className="py-8 text-center text-sm text-ink/50 dark:text-paper/50">
+                Waiting for the first event…
+              </p>
+            )}
+            {noProgressYet && (
+              <WaitingCard secondsSinceEvent={secondsSinceEvent} />
+            )}
+            {stalled && <StalledBanner seconds={secondsSinceEvent} />}
+            <AnimatePresence initial={false}>
+              {grouped.turns.map((t) => (
+                <TurnCard key={t.key} turn={t} />
+              ))}
+            </AnimatePresence>
+            {grouped.gameOver && <GameOverBanner event={grouped.gameOver} />}
+          </div>
+          {!timelineOpen && (
+            <div className="hidden flex-1 items-center justify-center lg:flex">
+              <span
+                className="font-mono-block text-[11px] uppercase tracking-[0.18em] text-ink/40 dark:text-paper/40"
+                style={{ writingMode: "vertical-rl" }}
+              >
+                Timeline
+              </span>
+            </div>
           )}
-        </div>
-      </section>
+        </aside>
+      </div>
     </main>
   );
 }
 
-function ConnPill({ state, error }: { state: ConnState; error: string | null }) {
-  if (state === "live") return null;
-  const bg = state === "error" ? "bg-rose-500/10 text-rose-600" : "bg-ink/10 text-ink/60 dark:bg-paper/10 dark:text-paper/60";
+function TimelineHeader({
+  open,
+  onToggle,
+  turnCount,
+  eventCount,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  turnCount: number;
+  eventCount: number;
+}) {
   return (
-    <span
-      className={`font-mono-block ${bg} rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.14em]`}
-      title={error ?? ""}
+    <div
+      className={`flex items-center gap-2 border-b border-ink/10 px-4 py-3 dark:border-paper/10 ${
+        open ? "justify-between" : "justify-center"
+      }`}
     >
-      {state === "error" ? `conn error` : "connecting"}
-    </span>
+      {open && (
+        <div className="flex flex-col">
+          <span className="font-mono-block text-[10px] uppercase tracking-[0.18em] text-ink/50 dark:text-paper/50">
+            Timeline
+          </span>
+          <span className="font-mono-block text-[10px] text-ink/40 dark:text-paper/40">
+            {turnCount} turn{turnCount === 1 ? "" : "s"} · {eventCount} event
+            {eventCount === 1 ? "" : "s"}
+          </span>
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={open ? "Collapse timeline" : "Expand timeline"}
+        className="hidden rounded-md border border-ink/10 p-1.5 text-ink/50 transition hover:border-ember hover:text-ember dark:border-paper/10 dark:text-paper/50 lg:inline-flex"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 20 20"
+          fill="none"
+          className={`transition-transform ${open ? "" : "rotate-180"}`}
+          aria-hidden
+        >
+          <path
+            d="M12 4l-6 6 6 6"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+    </div>
   );
 }
+
+// ─── Header sub-components ─────────────────────────────────────────────────────
 
 function StatusPill({ status, toMove }: { status: string; toMove: Side }) {
   if (status === "ongoing") {
@@ -262,6 +362,24 @@ function StatusPill({ status, toMove }: { status: string; toMove: Side }) {
     </span>
   );
 }
+
+function ConnPill({ state, error }: { state: ConnState; error: string | null }) {
+  if (state === "live") return null;
+  const bg =
+    state === "error"
+      ? "bg-rose-500/10 text-rose-600"
+      : "bg-ink/10 text-ink/60 dark:bg-paper/10 dark:text-paper/60";
+  return (
+    <span
+      className={`font-mono-block ${bg} rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.14em]`}
+      title={error ?? ""}
+    >
+      {state === "error" ? "conn error" : "connecting"}
+    </span>
+  );
+}
+
+// ─── Agent cards (side columns) ────────────────────────────────────────────────
 
 function AgentColumn({
   side,
@@ -313,12 +431,17 @@ function AgentCard({ agent }: { agent: AgentState }) {
               </span>
             )}
           </div>
+          {agent.lastProposedMove && (
+            <span className="mt-0.5 block font-mono-block text-[10px] text-ink/40 dark:text-paper/40">
+              → {agent.lastProposedMove}
+            </span>
+          )}
           {agent.lastStatement ? (
-            <p className="mt-1 line-clamp-3 text-xs text-ink/70 dark:text-paper/70">
+            <p className="mt-1.5 text-[13px] leading-snug text-ink/70 dark:text-paper/70">
               &ldquo;{agent.lastStatement}&rdquo;
             </p>
           ) : (
-            <p className="mt-1 text-xs italic text-ink/40 dark:text-paper/40">
+            <p className="mt-1.5 text-xs italic text-ink/40 dark:text-paper/40">
               {agent.status === "thinking" ? "thinking…" : "yet to speak"}
             </p>
           )}
@@ -328,214 +451,396 @@ function AgentCard({ agent }: { agent: AgentState }) {
   );
 }
 
-function Row({ children }: { children: React.ReactNode }) {
+// ─── Turn cards ────────────────────────────────────────────────────────────────
+
+function WaitingCard({ secondsSinceEvent }: { secondsSinceEvent: number }) {
   return (
-    <motion.li
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="flex gap-3 text-sm"
-    >
-      {children}
-    </motion.li>
+    <div className="rounded-lg border border-ember/30 bg-ember/5 p-4">
+      <div className="flex items-center gap-2">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ember" />
+        <span className="font-mono-block text-[10px] uppercase tracking-[0.18em] text-ember">
+          Waiting for first turn
+        </span>
+      </div>
+      <p className="mt-2 text-sm text-ink/70 dark:text-paper/70">
+        Your orchestrator is spawning piece-agents and running the first
+        deliberation. This typically takes 30 to 60 seconds.
+      </p>
+      {secondsSinceEvent > 10 && (
+        <p className="mt-1 font-mono-block text-[10px] text-ink/40 dark:text-paper/40">
+          last event {secondsSinceEvent}s ago
+        </p>
+      )}
+    </div>
   );
 }
 
-function Seq({ seq, tone = "muted" }: { seq: number; tone?: "muted" | "ember" | "rose" }) {
-  const color =
-    tone === "ember"
-      ? "text-ember"
-      : tone === "rose"
-        ? "text-rose-600"
-        : "text-ink/40 dark:text-paper/40";
+function StalledBanner({ seconds }: { seconds: number }) {
+  const minutes = Math.floor(seconds / 60);
   return (
-    <span className={`font-mono-block w-12 shrink-0 text-[11px] ${color}`}>
-      {String(seq).padStart(3, "0")}
+    <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-4">
+      <div className="flex items-center gap-2">
+        <span className="font-mono-block text-[10px] uppercase tracking-[0.18em] text-rose-600">
+          Quiet for {minutes}m
+        </span>
+      </div>
+      <p className="mt-2 text-sm text-ink/70 dark:text-paper/70">
+        No new events from your Claude Code session for a while. Check the
+        terminal running the orchestrator — it may have paused, crashed, or
+        hit a context limit. The backend is fine; the viewer polls every
+        1.5s.
+      </p>
+    </div>
+  );
+}
+
+function OpeningBanner({ event }: { event: BaseEvent }) {
+  const cfg = (event as Record<string, unknown>).config as
+    | Record<string, unknown>
+    | undefined;
+  const white =
+    (cfg?.white as Record<string, unknown> | undefined)?.negotiation_strategy ??
+    "auction";
+  const black =
+    (cfg?.black as Record<string, unknown> | undefined)?.negotiation_strategy ??
+    "auction";
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="rounded-lg border border-ink/10 bg-paper p-3 text-xs text-ink/60 dark:border-paper/10 dark:bg-ink dark:text-paper/60"
+    >
+      <span className="font-serif-display text-sm text-ink dark:text-paper">
+        Game begins.
+      </span>{" "}
+      White: {String(white)} · Black: {String(black)}
+    </motion.div>
+  );
+}
+
+function GameOverBanner({ event }: { event: BaseEvent }) {
+  const e = event as Record<string, unknown>;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="rounded-lg border-2 border-ember bg-ember/10 p-4 text-center"
+    >
+      <span className="font-mono-block text-[11px] uppercase tracking-[0.18em] text-ember">
+        Game over
+      </span>
+      <p className="mt-2 font-serif-display text-xl">
+        🏁 <span className="capitalize">{e.winner as string}</span>{" "}
+        wins by {e.reason as string}
+      </p>
+    </motion.div>
+  );
+}
+
+function TurnCard({ turn }: { turn: Turn }) {
+  const winnerRole = auctionWinner(turn.result);
+  const resultMove =
+    ((turn.result as Record<string, unknown> | undefined)?.move as string) ?? null;
+  const phase = !turn.complete
+    ? turn.result
+      ? "deciding"
+      : turn.proposals.length > 0
+        ? "proposals in"
+        : "waiting"
+    : "resolved";
+
+  const sideColor = turn.side === "white" ? "text-ink dark:text-paper" : "text-ink/70 dark:text-paper/70";
+
+  return (
+    <motion.article
+      layout
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="rounded-xl border border-ink/10 bg-paper/80 shadow-sm dark:border-paper/10 dark:bg-ink/60"
+    >
+      <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-ink/10 px-4 py-3 dark:border-paper/10">
+        <div className="flex items-baseline gap-3">
+          <span className="font-mono-block text-[11px] uppercase tracking-[0.18em] text-ink/40 dark:text-paper/40">
+            Turn {turn.turn}
+          </span>
+          <span className={`font-serif-display text-lg capitalize ${sideColor}`}>
+            {turn.side ?? "—"}
+          </span>
+        </div>
+        <span
+          className={`font-mono-block text-[10px] uppercase tracking-[0.18em] ${
+            turn.complete ? "text-ember" : "text-ink/40 dark:text-paper/40"
+          }`}
+        >
+          {phase}
+        </span>
+      </header>
+
+      <div className="flex flex-col gap-3 px-4 py-3">
+        {/* Phase 1: proposals */}
+        {turn.proposals.length > 0 && (
+          <section>
+            <PhaseLabel>Proposals ({turn.proposals.length})</PhaseLabel>
+            <ul className="mt-2 flex flex-col gap-2">
+              {turn.proposals.map((e) => {
+                const p = normalizeProposal(e);
+                const isWinner =
+                  winnerRole !== null && p.role === winnerRole;
+                return (
+                  <ProposalRow
+                    key={e.seq}
+                    seq={e.seq}
+                    role={p.role}
+                    move={p.move}
+                    confidence={p.confidence}
+                    publicStatement={p.publicStatement}
+                    trashTalk={p.trashTalk}
+                    isWinner={isWinner}
+                  />
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        {/* Phase 1.5: negotiation bar chart — visual summary */}
+        {turn.proposals.length > 1 && (
+          <section>
+            <PhaseLabel>Negotiation</PhaseLabel>
+            <div className="mt-2">
+              <NegotiationBars
+                data={turn.proposals.map((e): BarDatum => {
+                  const p = normalizeProposal(e);
+                  return { role: p.role, confidence: p.confidence, move: p.move };
+                })}
+                winnerRole={winnerRole}
+              />
+            </div>
+          </section>
+        )}
+
+        {/* Phase 2: debate */}
+        {turn.debate.length > 0 && (
+          <section>
+            <PhaseLabel>Debate ({turn.debate.length})</PhaseLabel>
+            <ul className="mt-2 flex flex-col gap-1 text-sm text-ink/70 dark:text-paper/70">
+              {turn.debate.map((e) => {
+                const ev = e as Record<string, unknown>;
+                return (
+                  <li key={e.seq}>
+                    <span className="font-serif-display capitalize">
+                      {(ev.agent as string) ?? (ev.group as string) ?? "agent"}
+                    </span>
+                    : &ldquo;{(ev.public_statement as string) ?? ""}&rdquo;
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        {/* Phase 3: decision */}
+        {turn.result && (
+          <DecisionBanner
+            result={turn.result}
+            winnerRole={winnerRole}
+            resultMove={resultMove}
+            proposalCount={turn.proposals.length}
+          />
+        )}
+
+        {/* Phase 4: move */}
+        {turn.move && <MoveResult event={turn.move} />}
+
+        {/* Narration */}
+        {turn.narration.length > 0 && (
+          <details className="text-xs text-ink/50 dark:text-paper/50">
+            <summary className="cursor-pointer select-none font-mono-block text-[10px] uppercase tracking-[0.14em]">
+              + {turn.narration.length} narration event
+              {turn.narration.length === 1 ? "" : "s"}
+            </summary>
+            <ul className="mt-2 flex flex-col gap-1 pl-2">
+              {turn.narration.map((e) => (
+                <li key={e.seq} className="font-mono-block text-[11px]">
+                  {String(e.type)}{" "}
+                  {(e as Record<string, unknown>).move
+                    ? `→ ${String((e as Record<string, unknown>).move)}`
+                    : ""}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
+        {/* Phase 5: reactions */}
+        {turn.reactions.length > 0 && (
+          <section>
+            <PhaseLabel>Reactions</PhaseLabel>
+            <ul className="mt-2 flex flex-col gap-2 text-sm">
+              {turn.reactions.map((e) => (
+                <ReactionRow key={e.seq} event={e} />
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {/* Still deliberating */}
+        {!turn.complete && !turn.result && turn.proposals.length > 0 && (
+          <p className="text-xs italic text-ink/40 dark:text-paper/40">
+            The {turn.side} agents are still proposing…
+          </p>
+        )}
+      </div>
+    </motion.article>
+  );
+}
+
+function PhaseLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="font-mono-block text-[10px] uppercase tracking-[0.18em] text-ink/40 dark:text-paper/40">
+      {children}
     </span>
   );
 }
 
-function EventRow({ event }: { event: BaseEvent }) {
-  if (event.type === "GAME_CREATED") {
-    return (
-      <Row>
-        <Seq seq={event.seq} />
-        <span className="italic text-ink/70 dark:text-paper/70">Game begins.</span>
-      </Row>
-    );
-  }
-
-  if (event.type === "TURN_STARTED") {
-    const side = ((event as Record<string, unknown>).side as Side) ?? "white";
-    return (
-      <Row>
-        <Seq seq={event.seq} />
-        <span className="text-ink/60 dark:text-paper/60">
-          Turn {event.turn} · <span className="font-serif-display capitalize">{side}</span>{" "}
-          deliberates.
-        </span>
-      </Row>
-    );
-  }
-
-  if (event.type === "MOVE") {
-    const m = normalizeMove(event);
-    return (
-      <Row>
-        <Seq seq={event.seq} tone="ember" />
-        <div className="flex items-center gap-2">
-          <span className="text-ember">✓</span>
-          <span>
-            <span className="font-serif-display capitalize">{m.side}</span> plays{" "}
-            <span className="font-mono-block">{m.san ?? m.move}</span>
-          </span>
-        </div>
-      </Row>
-    );
-  }
-
-  if (event.type === "MOVE_PLAYED") {
-    // Non-canonical narration from the orchestrator. Render distinctly so the
-    // reader can tell this from the server-written MOVE event.
-    const m = normalizeMove(event);
-    return (
-      <Row>
-        <Seq seq={event.seq} />
-        <span className="text-ink/50 dark:text-paper/50">
-          <span className="font-serif-display capitalize">{m.side}</span> is about to play{" "}
-          <span className="font-mono-block">{m.move}</span>…
-        </span>
-      </Row>
-    );
-  }
-
-  if (event.type === "PROPOSAL") {
-    const p = normalizeProposal(event);
-    const glyph = isRole(p.role) ? ROLE_GLYPH[p.role as Role] : "·";
-    const accent = isRole(p.role) ? ROLE_ACCENT[p.role as Role] : "";
-    const label = isRole(p.role) ? ROLE_LABEL[p.role as Role] : p.role || "agent";
-    return (
-      <Row>
-        <Seq seq={event.seq} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className={`text-lg leading-none ${accent}`}>{glyph}</span>
-            <span className="font-serif-display text-sm capitalize">
-              {p.side} {label}
-            </span>
-            {p.move && (
-              <span className="font-mono-block text-[11px] text-ink/40 dark:text-paper/40">
-                → {p.move}
-              </span>
-            )}
-            {p.confidence !== null && (
-              <span className="font-mono-block text-[10px] text-ink/40 dark:text-paper/40">
-                conf {p.confidence}
-              </span>
-            )}
-          </div>
-          {p.publicStatement ? (
-            <p className="mt-1 text-ink/80 dark:text-paper/80">
-              &ldquo;{p.publicStatement}&rdquo;
-            </p>
-          ) : (
-            <p className="mt-1 text-xs italic text-ink/40 dark:text-paper/40">
-              (no public statement)
-            </p>
-          )}
-          {p.trashTalk && (
-            <p className="mt-1 text-xs italic text-ember">{p.trashTalk}</p>
-          )}
-        </div>
-      </Row>
-    );
-  }
-
-  if (event.type === "AUCTION_RESULT" || event.type === "VOTE" || event.type === "DEBATE") {
-    const e = event as unknown as Record<string, unknown>;
-    const winner = (e.winner as string) ?? (e.agent as string) ?? (e.group as string) ?? "";
-    const move = (e.move as string) ?? (e.proposed_move as string) ?? "";
-    return (
-      <Row>
-        <Seq seq={event.seq} />
-        <div className="flex flex-wrap items-baseline gap-2">
-          <span className="font-mono-block text-[10px] uppercase tracking-[0.14em] text-ink/40 dark:text-paper/40">
-            {event.type.toLowerCase().replace("_", " ")}
-          </span>
-          {winner && (
-            <span className="font-serif-display capitalize">{winner}</span>
-          )}
-          {move && <span className="font-mono-block text-xs">→ {move}</span>}
-        </div>
-      </Row>
-    );
-  }
-
-  if (event.type === "REACTION") {
-    const e = event as unknown as Record<string, unknown>;
-    const side = (e.side as Side) ?? "white";
-    const agent = (e.agent as string) ?? (e.group as string) ?? "";
-    const glyph = isRole(agent) ? ROLE_GLYPH[agent as Role] : "·";
-    return (
-      <Row>
-        <Seq seq={event.seq} />
-        <div className="flex gap-2">
-          <span className="leading-none">{glyph}</span>
-          <p className="text-ink/70 dark:text-paper/70">
-            <span className="font-serif-display capitalize">
-              {side} {agent}
-            </span>
-            : &ldquo;{(e.public_statement as string) ?? ""}&rdquo;
-          </p>
-        </div>
-      </Row>
-    );
-  }
-
-  if (event.type === "KILL_LINE") {
-    const e = event as unknown as Record<string, unknown>;
-    return (
-      <Row>
-        <Seq seq={event.seq} tone="rose" />
-        <div className="flex flex-col gap-0.5 text-sm">
-          <span>
-            ⚔ <strong>{e.capturer as string}</strong> vs{" "}
-            <strong>{e.captured as string}</strong>
-          </span>
-          <span className="italic text-ink/70 dark:text-paper/70">
-            &ldquo;{e.last_words as string}&rdquo;
-          </span>
-        </div>
-      </Row>
-    );
-  }
-
-  if (event.type === "GAME_OVER") {
-    const e = event as unknown as Record<string, unknown>;
-    return (
-      <Row>
-        <Seq seq={event.seq} tone="ember" />
-        <span>
-          🏁 <strong className="font-serif-display capitalize">{e.winner as string}</strong>{" "}
-          wins by {e.reason as string}
-        </span>
-      </Row>
-    );
-  }
-
-  // Any other custom event type: render the type + a trimmed JSON snapshot.
-  const raw = JSON.stringify(event, null, 0);
-  const preview = raw.length > 140 ? raw.slice(0, 140) + "…" : raw;
+function ProposalRow({
+  seq,
+  role,
+  move,
+  confidence,
+  publicStatement,
+  trashTalk,
+  isWinner,
+}: {
+  seq: number;
+  role: string;
+  move: string;
+  confidence: number | null;
+  publicStatement: string;
+  trashTalk: string | null;
+  isWinner: boolean;
+}) {
+  const glyph = isRole(role) ? ROLE_GLYPH[role as Role] : "·";
+  const accent = isRole(role) ? ROLE_ACCENT[role as Role] : "";
+  const label = isRole(role) ? ROLE_LABEL[role as Role] : role || "agent";
   return (
-    <Row>
-      <Seq seq={event.seq} />
-      <div className="flex flex-col gap-0.5">
-        <span className="font-mono-block text-xs text-ink/60 dark:text-paper/60">
-          {event.type}
-        </span>
-        <span className="font-mono-block text-[10px] text-ink/40 dark:text-paper/40">
-          {preview}
-        </span>
+    <li
+      className={`rounded-lg border p-3 transition ${
+        isWinner
+          ? "border-ember/50 bg-ember/5"
+          : "border-ink/10 bg-paper dark:border-paper/10 dark:bg-ink/40 opacity-70"
+      }`}
+    >
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className={`text-xl leading-none ${accent}`}>{glyph}</span>
+        <span className="font-serif-display text-sm">{label}</span>
+        {move && (
+          <span className="font-mono-block text-[11px] text-ink/50 dark:text-paper/50">
+            → {move}
+          </span>
+        )}
+        {confidence !== null && (
+          <span
+            className={`font-mono-block ml-auto rounded-full px-2 py-0.5 text-[10px] ${
+              isWinner
+                ? "bg-ember/20 text-ember"
+                : "bg-ink/10 text-ink/50 dark:bg-paper/10 dark:text-paper/50"
+            }`}
+          >
+            conf {confidence}
+          </span>
+        )}
+        {isWinner && (
+          <span className="font-mono-block rounded-full bg-ember px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-paper">
+            winner
+          </span>
+        )}
       </div>
-    </Row>
+      {publicStatement && (
+        <p className="mt-1.5 text-[13px] text-ink/80 dark:text-paper/80">
+          &ldquo;{publicStatement}&rdquo;
+        </p>
+      )}
+      {trashTalk && (
+        <p className="mt-1 text-xs italic text-ember/90">⚔ {trashTalk}</p>
+      )}
+      <span className="sr-only">event {seq}</span>
+    </li>
+  );
+}
+
+function DecisionBanner({
+  result,
+  winnerRole,
+  resultMove,
+  proposalCount,
+}: {
+  result: BaseEvent;
+  winnerRole: string | null;
+  resultMove: string | null;
+  proposalCount: number;
+}) {
+  const strategy = String(result.type).toLowerCase().replace(/_/g, " ");
+  const glyph = winnerRole && isRole(winnerRole) ? ROLE_GLYPH[winnerRole as Role] : null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg bg-ink/[0.04] px-3 py-2 text-xs dark:bg-paper/[0.04]">
+      <span className="font-mono-block uppercase tracking-[0.14em] text-ink/50 dark:text-paper/50">
+        {strategy}
+      </span>
+      <span className="text-ink/60 dark:text-paper/60">→</span>
+      {glyph && <span className="text-lg leading-none">{glyph}</span>}
+      <span className="font-serif-display text-sm capitalize">
+        {winnerRole ?? "agent"}
+      </span>
+      {resultMove && (
+        <span className="font-mono-block text-ink/60 dark:text-paper/60">
+          plays {resultMove}
+        </span>
+      )}
+      {proposalCount > 1 && (
+        <span className="font-mono-block ml-auto text-[10px] text-ink/40 dark:text-paper/40">
+          out of {proposalCount}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function MoveResult({ event }: { event: BaseEvent }) {
+  const m = normalizeMove(event);
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-ember/30 bg-ember/5 px-3 py-2">
+      <span className="text-ember">✓</span>
+      <span className="font-serif-display text-sm capitalize">{m.side}</span>
+      <span className="text-ink/60 dark:text-paper/60">plays</span>
+      <span className="font-mono-block text-sm text-ember">
+        {m.san ?? m.move}
+      </span>
+    </div>
+  );
+}
+
+function ReactionRow({ event }: { event: BaseEvent }) {
+  const e = event as Record<string, unknown>;
+  if (e.type === "KILL_LINE") {
+    return (
+      <li className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-2">
+        <span className="text-rose-600">⚔</span>{" "}
+        <strong className="font-serif-display">{e.capturer as string}</strong> vs{" "}
+        <strong className="font-serif-display">{e.captured as string}</strong>
+        <p className="mt-1 italic text-ink/70 dark:text-paper/70">
+          &ldquo;{e.last_words as string}&rdquo;
+        </p>
+      </li>
+    );
+  }
+  const agent = (e.agent as string) ?? (e.group as string) ?? "";
+  const glyph = isRole(agent) ? ROLE_GLYPH[agent as Role] : "·";
+  return (
+    <li className="text-ink/70 dark:text-paper/70">
+      <span className="leading-none">{glyph}</span>{" "}
+      <span className="font-serif-display capitalize">{agent}</span>
+      : &ldquo;{(e.public_statement as string) ?? ""}&rdquo;
+    </li>
   );
 }
