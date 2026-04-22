@@ -57,13 +57,18 @@ max_turns: 60
 
 ## 0.5. Interview the user — do this BEFORE creating the game
 
-Take 30 seconds to learn what game the user wants. Ask all the questions below in one message as a numbered block. The user answers inline. If they reply "just defaults" or "skip" or similar, use Section 0 unchanged and move on.
+Take 30 seconds to learn what game the user wants. **Ask ALL SIX questions below in one message** as a numbered block. The user answers inline. If they reply "just defaults" or "skip" or similar, use Section 0 unchanged and move on (mode defaults to \`ai_vs_ai\`).
 
-Your message to them should look like:
+Your message to them MUST include every one of these questions, in this order:
 
 > Before I start the game, a few quick choices (or reply "defaults" to skip):
 >
-> 1. **Negotiation strategy** — how do the agents decide each move?
+> 1. **Game mode** — who plays?
+>    - \`ai_vs_ai\` (default) — both sides are AI agents. You watch.
+>    - \`human_vs_ai\` — you play one color by dragging pieces in your browser; AI plays the other.
+>    (If you pick \`human_vs_ai\`, tell me which color: white or black.)
+>
+> 2. **Negotiation strategy** — how do the agents decide each move?
 >    - \`auction\` (default) — highest-confidence proposal wins. Punchy, short turns.
 >    - \`democracy\` — one vote per agent, plurality wins.
 >    - \`monarchy\` — the King picks from teammates' proposals.
@@ -73,21 +78,25 @@ Your message to them should look like:
 >    - \`rotating\` — each turn, a different piece-group has sole authority.
 >    - \`anarchy\` — random proposal wins. Pure comedy.
 >
-> 2. **Personality preset** — the voice the agents speak in.
+> 3. **Personality preset** — the voice the agents speak in.
 >    - \`medieval_serious\` (default) — thy / forsooth, scheming bishops, gallant knights.
 >    - \`shakespearean_tragedy\` — iambic pentameter, melodramatic death speeches.
 >    - \`modern_office\` — Queen = CEO, pawns = interns, Slack-speak.
 >
-> 3. **Trash-talk intensity** — \`none\` / \`mild\` (default) / \`spicy\` / \`unhinged\`.
+> 4. **Trash-talk intensity** — \`none\` / \`mild\` (default) / \`spicy\` / \`unhinged\`.
 >
-> 4. **Max turns** before we auto-end — default \`60\` (anything 20–300 works).
+> 5. **Max turns** before we auto-end — default \`60\` (anything 20–300 works).
 >
-> 5. **Asymmetric?** — different strategy/personality for white vs. black is a feature. Pick this only if you want it; default = same on both sides.
+> 6. **Asymmetric?** — different strategy/personality for white vs. black is a feature. Pick this only if you want it; default = same on both sides.
+
+**Do not skip question 1.** It must be asked on every game, even if it feels redundant. If you leave it out and the user wanted 1P mode, they'll be stuck watching an AI-vs-AI game they didn't want.
 
 Parse the answers, build a \`config\` object of this shape:
 
 \`\`\`json
 {
+  "mode": "ai_vs_ai",                  // or "human_vs_ai"
+  "human_plays": null,                 // "white" or "black" when mode == human_vs_ai
   "white": {
     "topology": "grouped",
     "personality_preset": "<preset>",
@@ -101,32 +110,16 @@ Parse the answers, build a \`config\` object of this shape:
 \`\`\`
 
 Rules when parsing:
-- Unrecognized strategy / preset names → tell the user the valid list and re-ask.
+- Unrecognized mode / strategy / preset → tell the user the valid list and re-ask.
+- \`human_vs_ai\` without a color → re-ask "Which color do you play?"
 - If they picked **asymmetric**, ask follow-up questions for each side; otherwise copy the same values to both.
 - If they gave a partial answer (only strategy, skipping personality), fill the rest from defaults without re-asking.
 - Read back the final resolved config to them in one line before creating the game:
-  > "Great — auction + medieval_serious + mild trash talk, 60 turns. Starting now."
-
-Only after the interview do you proceed to Section 1.
-
-## 0.6. Game mode — ask the user BEFORE game creation
-
-Do this first (or fold it into any other interview step you're running). Pick one:
-
-- **AI vs AI** (default) — both sides are piece-agents. You just watch.
-- **Human vs AI** — one side is a human move-by-move; the other side is piece-agents.
-
-If Human vs AI, also ask: "Do you play white or black?" The human moving white has classical first-move advantage; black is a reactive game.
-
-Record the choice into the config you POST in Section 1:
-
-\`\`\`json
-{"mode": "ai_vs_ai"}                                 // default
-{"mode": "human_vs_ai", "human_plays": "white"}     // human is white
-{"mode": "human_vs_ai", "human_plays": "black"}     // human is black
-\`\`\`
+  > "Great — 1P (you play white) · auction + medieval_serious + mild, 60 turns. Starting now."
 
 The backend rejects \`mode: "human_vs_ai"\` without \`human_plays\` with a 400.
+
+Only after the interview do you proceed to Section 1.
 
 ## 1. Create the game session
 
