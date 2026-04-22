@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en" class="bg-paper text-ink">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chess of Minds · Analytics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              paper: "#F4EEE3",
+              ink: "#141413",
+              ember: "#D97757",
+            },
+            fontFamily: {
+              serif: ["Fraunces", "IBM Plex Serif", "Georgia", "serif"],
+              sans: ["Inter", "system-ui", "sans-serif"],
+              mono: ['"IBM Plex Mono"', "ui-monospace", "monospace"],
+            },
+          },
+        },
+      };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+      body {
+        font-family: "Inter", system-ui, sans-serif;
+      }
+      .font-serif {
+        font-family: "Fraunces", "IBM Plex Serif", Georgia, serif;
+      }
+      .font-mono {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        html {
+          background: #141413;
+          color: #f4eee3;
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-paper text-ink dark:bg-ink dark:text-paper">
+    <main class="mx-auto flex max-w-[1400px] flex-col gap-8 px-6 py-8">
+      <header class="flex flex-wrap items-end justify-between gap-3">
+        <div class="flex flex-col gap-1">
+          <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-ink/50 dark:text-paper/50">
+            Chess of Minds
+          </span>
+          <h1 class="font-serif text-4xl tracking-tight">Analytics</h1>
+        </div>
+        <div class="flex items-center gap-4 text-xs">
+          <span
+            id="last-updated"
+            class="font-mono text-ink/50 dark:text-paper/50"
+          ></span>
+          <span id="config-line" class="font-mono text-ink/40 dark:text-paper/40"></span>
+          <button
+            id="refresh"
+            class="rounded-md border border-ink/15 px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] transition hover:border-ember hover:text-ember dark:border-paper/20"
+          >
+            Refresh
+          </button>
+        </div>
+      </header>
+
+      <!-- KPI cards -->
+      <section class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div id="kpi-total" class="kpi"></div>
+        <div id="kpi-active" class="kpi"></div>
+        <div id="kpi-24h" class="kpi"></div>
+        <div id="kpi-hour" class="kpi"></div>
+        <div id="kpi-avg-turns" class="kpi"></div>
+        <div id="kpi-events" class="kpi"></div>
+      </section>
+
+      <!-- Charts row -->
+      <section class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div class="panel">
+          <h2 class="panel-title">Negotiation strategies</h2>
+          <p class="panel-sub">White vs black, across all games.</p>
+          <div class="mt-4 h-[260px]">
+            <canvas id="chart-strategies"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <h2 class="panel-title">Game mode</h2>
+          <p class="panel-sub">AI vs AI, or Human vs AI.</p>
+          <div class="mt-4 h-[260px]">
+            <canvas id="chart-mode"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <h2 class="panel-title">Game status</h2>
+          <p class="panel-sub">How games end, or if they stall.</p>
+          <div class="mt-4 h-[260px]">
+            <canvas id="chart-status"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div class="panel">
+          <h2 class="panel-title">Turn reached (histogram)</h2>
+          <p class="panel-sub">How many turns games progress before ending.</p>
+          <div class="mt-4 h-[260px]">
+            <canvas id="chart-turns"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <h2 class="panel-title">Personality presets</h2>
+          <p class="panel-sub">Voice the agents adopt.</p>
+          <div class="mt-4 h-[260px]">
+            <canvas id="chart-presets"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <!-- Recent games table -->
+      <section class="panel">
+        <div class="flex items-baseline justify-between">
+          <div>
+            <h2 class="panel-title">Recent games</h2>
+            <p class="panel-sub">Most recent 50. Click a row to inspect events.</p>
+          </div>
+          <a
+            href="/api/games?limit=500"
+            target="_blank"
+            class="font-mono text-[11px] uppercase tracking-[0.14em] text-ink/40 hover:text-ember dark:text-paper/40"
+            >JSON</a
+          >
+        </div>
+        <div class="mt-4 overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left font-mono text-[10px] uppercase tracking-[0.14em] text-ink/40 dark:text-paper/40">
+                <th class="px-2 py-2">Created</th>
+                <th class="px-2 py-2">ID</th>
+                <th class="px-2 py-2">Mode</th>
+                <th class="px-2 py-2">White</th>
+                <th class="px-2 py-2">Black</th>
+                <th class="px-2 py-2 text-right">Turn</th>
+                <th class="px-2 py-2 text-right">Events</th>
+                <th class="px-2 py-2">Status</th>
+                <th class="px-2 py-2"></th>
+              </tr>
+            </thead>
+            <tbody id="games-body" class="font-mono text-[12px]"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Game detail -->
+      <section id="game-detail" class="panel hidden">
+        <div class="flex items-baseline justify-between">
+          <div>
+            <h2 class="panel-title">Events for <span id="detail-id" class="font-mono"></span></h2>
+            <p class="panel-sub">Ordered by seq. Click a row to see full JSON.</p>
+          </div>
+          <button
+            id="close-detail"
+            class="font-mono text-[11px] uppercase tracking-[0.14em] text-ink/40 hover:text-ember dark:text-paper/40"
+          >
+            Close
+          </button>
+        </div>
+        <div class="mt-4 max-h-[520px] overflow-y-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left font-mono text-[10px] uppercase tracking-[0.14em] text-ink/40 dark:text-paper/40">
+                <th class="px-2 py-2 text-right">Seq</th>
+                <th class="px-2 py-2 text-right">Turn</th>
+                <th class="px-2 py-2">Type</th>
+                <th class="px-2 py-2">Side</th>
+                <th class="px-2 py-2">Agent</th>
+                <th class="px-2 py-2">Summary</th>
+              </tr>
+            </thead>
+            <tbody id="detail-body" class="font-mono text-[12px]"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Logs -->
+      <section class="panel">
+        <div class="flex items-baseline justify-between">
+          <div>
+            <h2 class="panel-title">CloudWatch logs</h2>
+            <p class="panel-sub">Lambda structured logs. Filter like
+              <code class="font-mono text-[11px]">"game_started"</code>
+              or
+              <code class="font-mono text-[11px]">ERROR</code>.</p>
+          </div>
+        </div>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <input
+            id="log-filter"
+            type="text"
+            placeholder='Filter pattern (e.g. "game_started")'
+            class="flex-1 min-w-[200px] rounded-md border border-ink/15 bg-paper px-3 py-2 font-mono text-[12px] focus:border-ember focus:outline-none dark:border-paper/20 dark:bg-ink"
+          />
+          <select
+            id="log-since"
+            class="rounded-md border border-ink/15 bg-paper px-3 py-2 font-mono text-[11px] dark:border-paper/20 dark:bg-ink"
+          >
+            <option value="15">15 min</option>
+            <option value="60" selected>1 h</option>
+            <option value="360">6 h</option>
+            <option value="1440">24 h</option>
+            <option value="10080">7 d</option>
+          </select>
+          <select
+            id="log-limit"
+            class="rounded-md border border-ink/15 bg-paper px-3 py-2 font-mono text-[11px] dark:border-paper/20 dark:bg-ink"
+          >
+            <option value="25">25</option>
+            <option value="50" selected>50</option>
+            <option value="200">200</option>
+            <option value="500">500</option>
+          </select>
+          <button
+            id="log-search"
+            class="rounded-md bg-ember px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-paper hover:bg-ember/90"
+          >
+            Search
+          </button>
+        </div>
+        <div
+          id="logs-body"
+          class="mt-4 max-h-[420px] overflow-y-auto rounded-md border border-ink/10 bg-ink/[0.03] p-3 font-mono text-[11px] leading-relaxed dark:border-paper/10 dark:bg-paper/[0.03]"
+        >
+          <span class="text-ink/40 dark:text-paper/40">Click Search to load logs.</span>
+        </div>
+      </section>
+    </main>
+
+    <style>
+      .kpi {
+        @apply flex flex-col gap-1 rounded-lg border border-ink/10 bg-paper/60 px-4 py-3 dark:border-paper/10 dark:bg-ink/40;
+      }
+      .kpi-label {
+        @apply font-mono text-[10px] uppercase tracking-[0.16em] text-ink/50 dark:text-paper/50;
+      }
+      .kpi-value {
+        @apply font-serif text-3xl tracking-tight;
+      }
+      .kpi-sub {
+        @apply font-mono text-[10px] text-ink/40 dark:text-paper/40;
+      }
+      .panel {
+        @apply rounded-xl border border-ink/10 bg-paper/60 p-5 dark:border-paper/10 dark:bg-ink/40;
+      }
+      .panel-title {
+        @apply font-serif text-lg tracking-tight;
+      }
+      .panel-sub {
+        @apply mt-0.5 text-sm text-ink/60 dark:text-paper/60;
+      }
+      .status-pill {
+        @apply inline-flex rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.12em];
+      }
+      .status-ongoing {
+        @apply bg-ember/15 text-ember;
+      }
+      .status-checkmate,
+      .status-stalemate,
+      .status-insufficient_material {
+        @apply bg-emerald-500/15 text-emerald-700 dark:text-emerald-400;
+      }
+      .status-unknown,
+      .status-other {
+        @apply bg-ink/10 text-ink/60 dark:bg-paper/10 dark:text-paper/60;
+      }
+    </style>
+
+    <script>
+      const EMBER = "#D97757";
+      const INK = "#141413";
+      const INK_MUTED = "#857f75";
+      const PALETTE = [
+        "#D97757",
+        "#4F46E5",
+        "#059669",
+        "#0284C7",
+        "#9333EA",
+        "#EA580C",
+        "#7C2D12",
+        "#374151",
+      ];
+
+      const chartDefaults = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            labels: {
+              font: { family: "IBM Plex Mono", size: 10 },
+              color: INK_MUTED,
+            },
+          },
+          tooltip: {
+            titleFont: { family: "Fraunces", size: 13 },
+            bodyFont: { family: "IBM Plex Mono", size: 11 },
+            backgroundColor: INK,
+          },
+        },
+        scales: {
+          x: {
+            ticks: { font: { family: "IBM Plex Mono", size: 10 }, color: INK_MUTED },
+            grid: { color: "rgba(20,20,19,0.05)" },
+          },
+          y: {
+            ticks: { font: { family: "IBM Plex Mono", size: 10 }, color: INK_MUTED },
+            grid: { color: "rgba(20,20,19,0.05)" },
+            beginAtZero: true,
+          },
+        },
+      };
+
+      let charts = {};
+
+      function fmt(n) {
+        if (n === undefined || n === null) return "—";
+        if (Math.abs(n) >= 1000) return (n / 1000).toFixed(1) + "k";
+        return String(n);
+      }
+
+      function fmtTime(epochS) {
+        if (!epochS) return "—";
+        const d = new Date(epochS * 1000);
+        const now = Date.now();
+        const delta = (now - d.getTime()) / 1000;
+        if (delta < 60) return "just now";
+        if (delta < 3600) return Math.floor(delta / 60) + "m ago";
+        if (delta < 86400) return Math.floor(delta / 3600) + "h ago";
+        return Math.floor(delta / 86400) + "d ago";
+      }
+
+      function kpi(id, label, value, sub) {
+        document.getElementById(id).innerHTML = `
+          <span class="kpi-label">${label}</span>
+          <span class="kpi-value">${fmt(value)}</span>
+          ${sub ? `<span class="kpi-sub">${sub}</span>` : ""}
+        `;
+      }
+
+      function renderCharts(stats) {
+        // Strategy: grouped bar, white vs black
+        const strategies = Object.keys(
+          { ...stats.strategies.white, ...stats.strategies.black },
+        );
+        const strategiesData = {
+          labels: strategies,
+          datasets: [
+            {
+              label: "White",
+              data: strategies.map((s) => stats.strategies.white[s] || 0),
+              backgroundColor: "rgba(217,119,87,0.7)",
+            },
+            {
+              label: "Black",
+              data: strategies.map((s) => stats.strategies.black[s] || 0),
+              backgroundColor: "rgba(20,20,19,0.5)",
+            },
+          ],
+        };
+        replaceChart("chart-strategies", { type: "bar", data: strategiesData, options: chartDefaults });
+
+        // Mode pie
+        const modeEntries = Object.entries(stats.by_mode);
+        replaceChart("chart-mode", {
+          type: "doughnut",
+          data: {
+            labels: modeEntries.map((e) => e[0]),
+            datasets: [
+              {
+                data: modeEntries.map((e) => e[1]),
+                backgroundColor: PALETTE,
+              },
+            ],
+          },
+          options: { ...chartDefaults, scales: {} },
+        });
+
+        // Status pie
+        const statusEntries = Object.entries(stats.by_status);
+        replaceChart("chart-status", {
+          type: "doughnut",
+          data: {
+            labels: statusEntries.map((e) => e[0]),
+            datasets: [
+              {
+                data: statusEntries.map((e) => e[1]),
+                backgroundColor: PALETTE,
+              },
+            ],
+          },
+          options: { ...chartDefaults, scales: {} },
+        });
+
+        // Turn histogram
+        replaceChart("chart-turns", {
+          type: "bar",
+          data: {
+            labels: stats.turn_histogram.buckets.map((b) => `≥${b}`),
+            datasets: [
+              {
+                label: "games",
+                data: stats.turn_histogram.counts,
+                backgroundColor: "rgba(217,119,87,0.7)",
+              },
+            ],
+          },
+          options: { ...chartDefaults, plugins: { ...chartDefaults.plugins, legend: { display: false } } },
+        });
+
+        // Presets grouped bar
+        const presets = Object.keys({ ...stats.presets.white, ...stats.presets.black });
+        replaceChart("chart-presets", {
+          type: "bar",
+          data: {
+            labels: presets,
+            datasets: [
+              {
+                label: "White",
+                data: presets.map((p) => stats.presets.white[p] || 0),
+                backgroundColor: "rgba(217,119,87,0.7)",
+              },
+              {
+                label: "Black",
+                data: presets.map((p) => stats.presets.black[p] || 0),
+                backgroundColor: "rgba(20,20,19,0.5)",
+              },
+            ],
+          },
+          options: chartDefaults,
+        });
+      }
+
+      function replaceChart(canvasId, spec) {
+        if (charts[canvasId]) charts[canvasId].destroy();
+        const el = document.getElementById(canvasId);
+        if (!el) return;
+        charts[canvasId] = new Chart(el, spec);
+      }
+
+      async function loadStats() {
+        const r = await fetch("/api/stats");
+        const s = await r.json();
+        kpi("kpi-total", "Total games", s.total_games);
+        kpi(
+          "kpi-active",
+          "Active",
+          s.active_games,
+          s.active_games === 1 ? "game ongoing" : "games ongoing",
+        );
+        kpi("kpi-24h", "Last 24h", s.games_last_24h);
+        kpi("kpi-hour", "Last hour", s.games_last_hour);
+        kpi("kpi-avg-turns", "Avg turns", s.avg_turns_per_game);
+        kpi("kpi-events", "Total events", s.total_events);
+        renderCharts(s);
+        document.getElementById("last-updated").textContent =
+          "Last updated: " + new Date().toLocaleTimeString();
+      }
+
+      async function loadGames() {
+        const r = await fetch("/api/games?limit=50");
+        const games = await r.json();
+        const body = document.getElementById("games-body");
+        body.innerHTML = "";
+        if (games.length === 0) {
+          body.innerHTML = `<tr><td colspan="9" class="px-2 py-6 text-center text-ink/40 dark:text-paper/40">No games yet. Start one via your Claude Code session.</td></tr>`;
+          return;
+        }
+        for (const g of games) {
+          const tr = document.createElement("tr");
+          tr.className = "border-t border-ink/5 hover:bg-ember/5 cursor-pointer dark:border-paper/5";
+          tr.addEventListener("click", () => showGameDetail(g.id));
+          const statusKnown = ["ongoing", "checkmate", "stalemate", "insufficient_material"].includes(g.status);
+          const statusClass = statusKnown ? "status-" + g.status : "status-other";
+          tr.innerHTML = `
+            <td class="px-2 py-2 text-ink/60 dark:text-paper/60">${fmtTime(g.created_at)}</td>
+            <td class="px-2 py-2">${g.id}</td>
+            <td class="px-2 py-2">${g.mode}${g.human_plays ? ` · ${g.human_plays}` : ""}</td>
+            <td class="px-2 py-2 text-ink/70 dark:text-paper/70">${g.white.negotiation_strategy ?? "—"}</td>
+            <td class="px-2 py-2 text-ink/70 dark:text-paper/70">${g.black.negotiation_strategy ?? "—"}</td>
+            <td class="px-2 py-2 text-right">${g.current_turn}</td>
+            <td class="px-2 py-2 text-right">${g.next_seq}</td>
+            <td class="px-2 py-2"><span class="status-pill ${statusClass}">${g.status}</span></td>
+            <td class="px-2 py-2">
+              ${g.watch_url ? `<a href="${g.watch_url}" target="_blank" onclick="event.stopPropagation()" class="text-ember hover:underline">watch</a>` : ""}
+            </td>
+          `;
+          body.appendChild(tr);
+        }
+      }
+
+      async function showGameDetail(gameId) {
+        const panel = document.getElementById("game-detail");
+        const body = document.getElementById("detail-body");
+        document.getElementById("detail-id").textContent = gameId;
+        panel.classList.remove("hidden");
+        body.innerHTML = `<tr><td colspan="6" class="px-2 py-4 text-ink/40 dark:text-paper/40">Loading…</td></tr>`;
+        panel.scrollIntoView({ behavior: "smooth", block: "start" });
+        const r = await fetch(`/api/games/${encodeURIComponent(gameId)}/events`);
+        const events = await r.json();
+        body.innerHTML = "";
+        for (const e of events) {
+          const tr = document.createElement("tr");
+          tr.className = "border-t border-ink/5 dark:border-paper/5";
+          const summary = summarizeEvent(e);
+          tr.innerHTML = `
+            <td class="px-2 py-1 text-right text-ink/50 dark:text-paper/50">${e.seq ?? "—"}</td>
+            <td class="px-2 py-1 text-right text-ink/50 dark:text-paper/50">${e.turn ?? "—"}</td>
+            <td class="px-2 py-1">${e.type}</td>
+            <td class="px-2 py-1 text-ink/60 dark:text-paper/60">${e.side ?? ""}</td>
+            <td class="px-2 py-1 text-ink/60 dark:text-paper/60">${e.agent ?? e.group ?? ""}</td>
+            <td class="px-2 py-1 text-ink/70 dark:text-paper/70" title='${jsonAttr(e)}'>${summary}</td>
+          `;
+          body.appendChild(tr);
+        }
+      }
+
+      function summarizeEvent(e) {
+        if (e.type === "GAME_CREATED") {
+          const c = e.config || {};
+          return `config · white:${c.white?.negotiation_strategy || "?"} · black:${c.black?.negotiation_strategy || "?"}`;
+        }
+        if (e.type === "PROPOSAL") {
+          const p = e.proposal || {};
+          const move = p.proposed_move || e.move;
+          const stmt = p.public_statement || e.public_statement;
+          return `${move} (conf ${p.confidence ?? e.confidence ?? "?"}) ${stmt ? `"${truncate(stmt, 60)}"` : ""}`;
+        }
+        if (e.type === "MOVE" || e.type === "MOVE_PLAYED") {
+          return `${e.san || e.move || "?"}${e.fen_after ? ` → ${truncate(e.fen_after, 40)}` : ""}`;
+        }
+        if (e.type === "AUCTION_RESULT") {
+          return `winner ${e.winner || e.agent || e.group || "?"} · ${e.move || ""}`;
+        }
+        if (e.type === "GAME_OVER") {
+          return `${e.winner || "?"} wins by ${e.reason || "?"}`;
+        }
+        if (e.type === "KILL_LINE") {
+          return `${e.capturer} captured ${e.captured}`;
+        }
+        return "";
+      }
+
+      function truncate(s, n) {
+        s = String(s);
+        return s.length > n ? s.slice(0, n) + "…" : s;
+      }
+      function jsonAttr(e) {
+        return JSON.stringify(e).replace(/'/g, "&#39;");
+      }
+
+      document.getElementById("close-detail").addEventListener("click", () => {
+        document.getElementById("game-detail").classList.add("hidden");
+      });
+
+      async function loadLogs() {
+        const filter = document.getElementById("log-filter").value.trim();
+        const since = document.getElementById("log-since").value;
+        const limit = document.getElementById("log-limit").value;
+        const params = new URLSearchParams({
+          filter_pattern: filter,
+          since_minutes: since,
+          limit,
+        });
+        const body = document.getElementById("logs-body");
+        body.textContent = "Loading…";
+        const r = await fetch("/api/logs?" + params.toString());
+        if (!r.ok) {
+          body.textContent = "error: " + r.status + " " + r.statusText;
+          return;
+        }
+        const logs = await r.json();
+        if (logs.length === 0) {
+          body.innerHTML =
+            `<span class="text-ink/40 dark:text-paper/40">No matching log events in the selected window.</span>`;
+          return;
+        }
+        body.innerHTML = logs
+          .map((l) => {
+            const t = new Date(l.timestamp).toLocaleTimeString();
+            const parsedPretty = l.parsed
+              ? `<pre class="mt-1 whitespace-pre-wrap text-ember">${escapeHtml(JSON.stringify(l.parsed, null, 2))}</pre>`
+              : "";
+            return `
+              <div class="border-t border-ink/10 py-2 first:border-t-0 dark:border-paper/10">
+                <div class="flex items-baseline gap-2">
+                  <span class="text-ink/40 dark:text-paper/40">${t}</span>
+                  <span class="text-ink/70 dark:text-paper/70">${escapeHtml(l.message)}</span>
+                </div>
+                ${parsedPretty}
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      document.getElementById("log-search").addEventListener("click", loadLogs);
+      document.getElementById("log-filter").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") loadLogs();
+      });
+
+      async function loadConfig() {
+        const r = await fetch("/api/config");
+        const c = await r.json();
+        document.getElementById("config-line").textContent =
+          `${c.region} · ${c.table}`;
+      }
+
+      async function refreshAll() {
+        await Promise.all([loadStats(), loadGames()]);
+      }
+
+      document.getElementById("refresh").addEventListener("click", refreshAll);
+      loadConfig();
+      refreshAll();
+      // Auto-refresh every 30 seconds
+      setInterval(refreshAll, 30_000);
+    </script>
+  </body>
+</html>
