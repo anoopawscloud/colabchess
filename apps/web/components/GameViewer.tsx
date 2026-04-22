@@ -110,8 +110,17 @@ export function GameViewer({
   const [conn, setConn] = useState<ConnState>("connecting");
   const [lastError, setLastError] = useState<string | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(true);
+  const [lastEventAt, setLastEventAt] = useState<number>(() => Date.now());
+  const [now, setNow] = useState<number>(() => Date.now());
   const timelineRef = useRef<HTMLDivElement>(null);
   const lastTurnCountRef = useRef(0);
+
+  // Tick `now` once per second so the "last event N ago" indicator updates
+  // without forcing a re-render on every poll.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!polling) return;
@@ -134,6 +143,7 @@ export function GameViewer({
         if (data.events?.length) {
           setEvents((prev) => [...prev, ...data.events]);
           setCursor(data.next_seq);
+          setLastEventAt(Date.now());
           const lastMove = [...data.events].reverse().find((e) => e.type === "MOVE");
           if (lastMove && (lastMove as Record<string, unknown>).fen_after) {
             setSnapshot((s) => ({
@@ -181,8 +191,18 @@ export function GameViewer({
     }
   }, [grouped.turns.length]);
 
+  const secondsSinceEvent = Math.floor((now - lastEventAt) / 1000);
+  const noProgressYet =
+    snapshot.status === "ongoing" &&
+    grouped.turns.length === 0 &&
+    grouped.opening !== undefined;
+  const stalled =
+    snapshot.status === "ongoing" &&
+    secondsSinceEvent > 90 &&
+    events.length > 0;
+
   return (
-    <main className="mx-auto flex min-h-[100svh] max-w-[1400px] flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6">
+    <main className="mx-auto flex max-w-[1400px] flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4 text-sm">
           <span className="font-serif-display text-base">Chess of Minds</span>
@@ -243,6 +263,10 @@ export function GameViewer({
                 Waiting for the first event…
               </p>
             )}
+            {noProgressYet && (
+              <WaitingCard secondsSinceEvent={secondsSinceEvent} />
+            )}
+            {stalled && <StalledBanner seconds={secondsSinceEvent} />}
             <AnimatePresence initial={false}>
               {grouped.turns.map((t) => (
                 <TurnCard key={t.key} turn={t} />
@@ -428,6 +452,47 @@ function AgentCard({ agent }: { agent: AgentState }) {
 }
 
 // ─── Turn cards ────────────────────────────────────────────────────────────────
+
+function WaitingCard({ secondsSinceEvent }: { secondsSinceEvent: number }) {
+  return (
+    <div className="rounded-lg border border-ember/30 bg-ember/5 p-4">
+      <div className="flex items-center gap-2">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ember" />
+        <span className="font-mono-block text-[10px] uppercase tracking-[0.18em] text-ember">
+          Waiting for first turn
+        </span>
+      </div>
+      <p className="mt-2 text-sm text-ink/70 dark:text-paper/70">
+        Your orchestrator is spawning piece-agents and running the first
+        deliberation. This typically takes 30 to 60 seconds.
+      </p>
+      {secondsSinceEvent > 10 && (
+        <p className="mt-1 font-mono-block text-[10px] text-ink/40 dark:text-paper/40">
+          last event {secondsSinceEvent}s ago
+        </p>
+      )}
+    </div>
+  );
+}
+
+function StalledBanner({ seconds }: { seconds: number }) {
+  const minutes = Math.floor(seconds / 60);
+  return (
+    <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-4">
+      <div className="flex items-center gap-2">
+        <span className="font-mono-block text-[10px] uppercase tracking-[0.18em] text-rose-600">
+          Quiet for {minutes}m
+        </span>
+      </div>
+      <p className="mt-2 text-sm text-ink/70 dark:text-paper/70">
+        No new events from your Claude Code session for a while. Check the
+        terminal running the orchestrator — it may have paused, crashed, or
+        hit a context limit. The backend is fine; the viewer polls every
+        1.5s.
+      </p>
+    </div>
+  );
+}
 
 function OpeningBanner({ event }: { event: BaseEvent }) {
   const cfg = (event as Record<string, unknown>).config as
