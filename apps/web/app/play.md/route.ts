@@ -21,6 +21,17 @@ All LLM inference happens inside your local session. For Claude Pro/Max users th
 - **The API is authoritative for move legality.** If you think a move is legal and the server says 400, the server is right.
 - **Use the canonical event types and shapes from Section 10.** The viewer is tolerant but not telepathic — if you invent \`MOVE_PLAYED\` when the spec says \`MOVE\`, or put \`group\` where the spec says \`agent\`, rows render as "· white → ''" instead of the speech bubble.
 - **Never break character inside piece-agent sub-agent prompts.**
+- **Never wait for user confirmation between sections.** After the interview (0.5) answers are in, flow straight through: create game, print watch URL, enter turn loop. Do not pause, do not say "ready to start?" The only times you pause for user input are: (a) the interview questions in Section 0.5, and (b) the human's own moves in Section 3a.1 if human-vs-ai mode is active.
+
+## Execution order (do all of these, in order, no pauses)
+
+1. Interview the user (Section 0.5). Wait for their answers.
+2. POST /games with the resolved config (Section 1).
+3. Print the watch URL to the user (Section 2). **Do not wait for acknowledgment.** Immediately go to step 4.
+4. Enter the turn loop (Section 3). Loop until the game ends or hits \`max_turns\`.
+5. POST a GAME_OVER event. Tell the user the result. Stop.
+
+If you find yourself idle at any point between steps 2 and 5, you have a bug. Re-read the section you're in and continue.
 
 ## 0. Default configuration
 
@@ -120,15 +131,15 @@ The response is:
 
 Save \`id\`, \`watch_url\`, and \`ingest_token\` for the rest of the session. The token is your write-capability — use it as \`Authorization: Bearer {ingest_token}\` on every write endpoint.
 
-## 2. Surface the watch URL to the human IMMEDIATELY
+## 2. Surface the watch URL to the human
 
 As soon as you have \`watch_url\`, print a message to the user that looks like:
 
 > 🎭 Your game is live at: \`{watch_url}\`
 >
-> Share this URL with friends — they can watch the match unfold in real time.
+> Share this URL with friends. Watch it unfold in real time. I'll start playing turns now.
 
-Do this before the first move is played. The human wants to share the link.
+**Do NOT wait for the user to respond.** Immediately continue to Section 3 in the same assistant turn or the next one. The whole point of the product is that once the URL is printed, the game plays itself. If you stop here, the user sees a frozen "Game begins" on the viewer and thinks the app is broken.
 
 ## 3. The turn loop
 
