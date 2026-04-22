@@ -20,19 +20,51 @@ All LLM inference happens inside your local session. For Claude Pro/Max users th
 - **Do NOT \`pip install\` anything.** You do not need python-chess, chess.js, or any other library locally. Everything you need (current FEN, legal moves, side to move, move validation) comes from the API. Installing packages on the user's machine is a bug, not a feature.
 - **The API is authoritative for move legality.** If you think a move is legal and the server says 400, the server is right.
 - **Use the canonical event types and shapes from Section 10.** The viewer is tolerant but not telepathic — if you invent \`MOVE_PLAYED\` when the spec says \`MOVE\`, or put \`group\` where the spec says \`agent\`, rows render as "· white → ''" instead of the speech bubble.
+- **You MUST use the Task tool to spawn piece-agents. Never inline them.** The product is twelve sub-agents arguing with each other. If you role-play the six piece-voices in your own turn, you collapse them all into one personality, there are no parallel proposals, no real negotiation, and the whole premise breaks. If you find yourself writing "Pawns say: …" as prose, STOP — that should have been a Task call.
+- **Sub-agent cost is NOT a reason to inline.** Spawning 6 sub-agents per turn × 2 sides × N turns is by design. Task calls inside a Claude Max session share your plan's session quota; they don't bill per call the way API keys do. With the \`chess-piece\` agent definition you'll create in Section 0.3, each sub-agent runs on Claude Haiku — fast and light. If the user's plan has a tight ceiling, reduce \`max_turns\`, don't compress multi-agent fan-out into one voice.
 - **Never break character inside piece-agent sub-agent prompts.**
 - **Never wait for user confirmation between sections.** After the interview (0.5) answers are in, flow straight through: create game, print watch URL, enter turn loop. Do not pause, do not say "ready to start?" The only time you pause for user input is during the interview questions in Section 0.5.
 - **Chess of Minds is AI vs AI only.** There is no human-player mode. Both sides are always driven by piece-agents you spawn. Do not offer mode choices, do not ask which side the user plays, do not prompt them for moves.
 
 ## Execution order (do all of these, in order, no pauses)
 
-1. Interview the user (Section 0.5). Wait for their answers.
-2. POST /games with the resolved config (Section 1).
-3. Print the watch URL to the user (Section 2). **Do not wait for acknowledgment.** Immediately go to step 4.
-4. Enter the turn loop (Section 3). Loop until the game ends or hits \`max_turns\`.
-5. POST a GAME_OVER event. Tell the user the result. Stop.
+1. One-time setup (Section 0.3): write \`.claude/agents/chess-piece.md\` and \`chessminds-memory.md\`.
+2. Interview the user (Section 0.5). Wait for their answers.
+3. POST /games with the resolved config (Section 1).
+4. Print the watch URL to the user (Section 2). **Do not wait for acknowledgment.** Immediately go to step 5.
+5. Enter the turn loop (Section 3). Loop until the game ends or hits \`max_turns\`.
+6. POST a GAME_OVER event. Tell the user the result. Stop.
 
-If you find yourself idle at any point between steps 2 and 5, you have a bug. Re-read the section you're in and continue.
+If you find yourself idle at any point between steps 3 and 6, you have a bug. Re-read the section you're in and continue.
+
+## 0.3. One-time setup — cheap sub-agents + memory file
+
+**Do this once, before the interview.** Two files in the user's current working directory.
+
+**File 1: \`.claude/agents/chess-piece.md\`** — routes every piece-agent Task call to Claude Haiku. Haiku is cheap and fast, more than enough for a ~150-token JSON proposal in character. Create the \`.claude/agents/\` directory if needed, then write:
+
+\`\`\`markdown
+---
+name: chess-piece
+description: A single chess piece-agent in Chess of Minds. Adopts the role and personality passed in the prompt, reads the position, and returns one Proposal JSON.
+model: haiku
+tools: []
+---
+
+You are a chess piece-agent. Role, personality, and current position arrive in each invocation. Stay ruthlessly in character. Respond with a single JSON object of the Proposal shape — no prose around it, no markdown fences.
+\`\`\`
+
+**File 2: \`chessminds-memory.md\`** — a human-readable running log of the game. Initialize it with:
+
+\`\`\`markdown
+# Chess of Minds — Game Memory
+
+_Appended to on every turn. One block per turn. The API event log is the machine record; this is the human record._
+\`\`\`
+
+You will append per-turn blocks to this file in step 3f2 below.
+
+With both files written, proceed to Section 0.5.
 
 ## 0. Default configuration
 
@@ -162,9 +194,11 @@ If a bucket is empty (e.g. you have no more knights), skip that agent — they h
 
 **3c. Spawn piece-agents in parallel — the critical step**
 
-In a single assistant message, issue one Task tool call per piece-agent on the side to move. All six fire concurrently. Use \`subagent_type: "general-purpose"\` unless you have a better match available.
+In a single assistant message, issue one Task tool call per piece-agent on the side to move (up to six, one per bucket from 3b). **All run concurrently.** Use \`subagent_type: "chess-piece"\` — that's the Haiku-backed agent you created in Section 0.3. Fall back to \`"general-purpose"\` only if the file somehow didn't get created, and fix that afterward.
 
 For each piece-agent, pass a prompt following the template in Section 4.
+
+**Do NOT role-play the agents inline.** Writing "Pawns say: …" as prose is not equivalent to a Task call. It collapses six voices into one, eliminates parallelism, and skips the personality diversity the product exists to demonstrate. If your reasoning is "this is cheaper than six Task calls" — re-read the Hard rules. Sub-agents run on Haiku, the product is AI-vs-AI multi-agent, and inline role-play defeats the point.
 
 **3d. Collect proposals + resolve**
 
@@ -198,6 +232,25 @@ For each sub-agent's proposal, POST to \`/games/{id}/events\`:
 \`\`\`
 
 Do these in parallel too. The viewer streams these as they appear.
+
+**3f2. Append the turn to \`chessminds-memory.md\`**
+
+After the move is played and events are recorded, append one block like this to \`chessminds-memory.md\`:
+
+\`\`\`markdown
+## Turn {N} · {white|black}
+
+- Position before: \`{FEN before}\`
+- Proposals:
+  - ♟ Pawns   → \`e2e4\`  conf 88  "We march!"
+  - ♞ Knights → \`g1f3\`  conf 74  "Onward."
+  - (others …)
+- Decision: auction · winner Pawns
+- Move played: \`e4\`
+- Position after: \`{FEN after}\`
+\`\`\`
+
+Keep lines short. Use \`cat >> chessminds-memory.md <<'EOF' … EOF\` or an equivalent append-mode write. This file is for humans skimming after the game; the API event log is the machine record.
 
 **3g. Reaction phase (optional but fun)**
 
