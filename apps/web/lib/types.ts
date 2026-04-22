@@ -30,14 +30,22 @@ export interface BaseEvent {
   [key: string]: unknown;
 }
 
+export type GameMode = "ai_vs_ai" | "human_vs_ai";
+
 export interface Snapshot {
   id: string;
   fen: string;
   status: string;
+  side_to_move?: "white" | "black";
+  legal_moves?: string[];
+  mode?: GameMode;
+  human_plays?: "white" | "black" | null;
   config: {
     white?: { personality_preset?: string; negotiation_strategy?: string };
     black?: { personality_preset?: string; negotiation_strategy?: string };
     max_turns?: number;
+    mode?: GameMode;
+    human_plays?: "white" | "black" | null;
   };
   next_seq: number;
   events: BaseEvent[];
