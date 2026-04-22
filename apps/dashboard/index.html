@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Chess of Minds · Analytics</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <style>
+      :root {
+        --paper: #f4eee3;
+        --ink: #141413;
+        --ember: #d97757;
+        --rule: rgba(20, 20, 19, 0.12);
+        --muted: rgba(20, 20, 19, 0.55);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Inter", sans-serif;
+      }
+      header {
+        padding: 24px 32px;
+        border-bottom: 1px solid var(--rule);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      header h1 {
+        margin: 0;
+        font-family: Fraunces, "Times New Roman", serif;
+        font-weight: 500;
+        font-size: 22px;
+      }
+      .muted { color: var(--muted); font-size: 12px; }
+      main {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 24px 32px 64px;
+        display: grid;
+        gap: 24px;
+      }
+      .kpi-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+      }
+      .kpi {
+        border: 1px solid var(--rule);
+        border-radius: 12px;
+        padding: 16px;
+        background: rgba(255, 255, 255, 0.4);
+      }
+      .kpi .label {
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .kpi .value {
+        font-family: Fraunces, serif;
+        font-size: 34px;
+        font-weight: 500;
+        margin-top: 6px;
+      }
+      .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+      .panel {
+        border: 1px solid var(--rule);
+        border-radius: 12px;
+        padding: 20px;
+        background: rgba(255, 255, 255, 0.4);
+      }
+      .panel h2 {
+        margin: 0 0 12px;
+        font-size: 13px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-weight: 500;
+      }
+      table { border-collapse: collapse; width: 100%; font-size: 13px; }
+      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); }
+      th { color: var(--muted); font-weight: 500; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+      td.id { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+      .pill {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        text-transform: lowercase;
+      }
+      .pill.ongoing { background: rgba(217, 119, 87, 0.18); color: var(--ember); }
+      .pill.finished { background: rgba(20, 20, 19, 0.08); }
+      .pill.abandoned { background: rgba(20, 20, 19, 0.05); color: var(--muted); }
+      .pill.unknown { background: rgba(20, 20, 19, 0.04); color: var(--muted); }
+      a { color: var(--ember); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      @media (max-width: 900px) {
+        .panels { grid-template-columns: 1fr; }
+        .kpi-row { grid-template-columns: repeat(2, 1fr); }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Chess of Minds · Analytics</h1>
+      <span class="muted" id="updated">loading…</span>
+    </header>
+    <main>
+      <section class="kpi-row" id="kpis"></section>
+      <section class="panels">
+        <div class="panel">
+          <h2>Games by status</h2>
+          <canvas id="status-chart" height="180"></canvas>
+        </div>
+        <div class="panel">
+          <h2>Negotiation strategy</h2>
+          <canvas id="strategy-chart" height="180"></canvas>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Recent games</h2>
+        <table id="games-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Status</th>
+              <th>Turn</th>
+              <th>Strategy</th>
+              <th>Preset</th>
+              <th>Created</th>
+              <th>Watch</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+    </main>
+    <script>
+      const fmtTime = (ts) => {
+        if (!ts) return "—";
+        const d = new Date(ts * 1000);
+        return d.toLocaleString();
+      };
+
+      let statusChart, strategyChart;
+
+      function renderKpis(stats) {
+        const root = document.getElementById("kpis");
+        const by = stats.by_status || {};
+        const cards = [
+          { label: "Total games", value: stats.total_games },
+          { label: "Ongoing", value: by.ongoing || 0 },
+          { label: "Abandoned", value: by.abandoned || 0 },
+          { label: "AI agents played", value: (stats.total_agents || 0).toLocaleString() },
+        ];
+        root.innerHTML = cards
+          .map(
+            (c) => `<div class="kpi"><div class="label">${c.label}</div><div class="value">${c.value}</div></div>`,
+          )
+          .join("");
+      }
+
+      function renderPie(ctxId, obj, existing) {
+        const labels = Object.keys(obj);
+        const values = labels.map((k) => obj[k]);
+        const colors = ["#D97757", "#141413", "#8C6F5A", "#B6A48B", "#4A4A49", "#C1A17C", "#7A574A"];
+        const cfg = {
+          type: "doughnut",
+          data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }] },
+          options: {
+            plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
+            cutout: "62%",
+          },
+        };
+        if (existing) { existing.destroy(); }
+        return new Chart(document.getElementById(ctxId), cfg);
+      }
+
+      function renderGames(rows) {
+        const tbody = document.querySelector("#games-table tbody");
+        tbody.innerHTML = rows
+          .map((r) => {
+            const status = r.status_derived || r.status || "unknown";
+            return `<tr>
+              <td class="id">${r.game_id ?? ""}</td>
+              <td><span class="pill ${status}">${status}</span></td>
+              <td>${r.current_turn ?? "—"}</td>
+              <td>${r.negotiation_strategy ?? "—"}</td>
+              <td>${r.personality_preset ?? "—"}</td>
+              <td>${fmtTime(r.created_at)}</td>
+              <td>${r.watch_url ? `<a href="${r.watch_url}" target="_blank" rel="noreferrer">watch</a>` : "—"}</td>
+            </tr>`;
+          })
+          .join("");
+      }
+
+      async function refresh() {
+        try {
+          const [s, g] = await Promise.all([
+            fetch("/api/stats").then((r) => r.json()),
+            fetch("/api/games?limit=100").then((r) => r.json()),
+          ]);
+          renderKpis(s);
+          statusChart = renderPie("status-chart", s.by_status || {}, statusChart);
+          strategyChart = renderPie("strategy-chart", s.by_strategy || {}, strategyChart);
+          renderGames(g);
+          document.getElementById("updated").textContent =
+            "updated " + new Date().toLocaleTimeString();
+        } catch (e) {
+          document.getElementById("updated").textContent = "error: " + e.message;
+        }
+      }
+
+      refresh();
+      setInterval(refresh, 20_000);
+    </script>
+  </body>
+</html>
