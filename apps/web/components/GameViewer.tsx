@@ -117,11 +117,15 @@ export function GameViewer({
   const lastTurnCountRef = useRef(0);
 
   // Extract ?play=TOKEN from the URL — the human player's browser bearer.
-  // Spectators (with only the watch URL) won't have it.
-  const playToken = useMemo(() => {
-    if (typeof window === "undefined") return null;
+  // Spectators (with only the watch URL) won't have it. Use effect+state so
+  // the value is set after hydration; useMemo during SSR would lock in null.
+  const [playToken, setPlayToken] = useState<string | null>(null);
+  useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("play");
-    return token && token.length >= 32 ? token : null;
+    if (token && token.length >= 32) {
+      setPlayToken(token);
+      console.info("[chessminds] play token detected, drag enabled when your turn");
+    }
   }, []);
 
   // Tick `now` once per second so the "last event N ago" indicator updates
@@ -271,6 +275,7 @@ export function GameViewer({
     targetSquare: string | null;
     piece?: unknown;
   }): boolean => {
+    console.info("[chessminds] drop attempt", { sourceSquare, targetSquare, canDrag });
     if (!canDrag || !targetSquare) return false;
     const base = `${sourceSquare}${targetSquare}`;
     if (legalMoveSet.has(base)) {
@@ -330,6 +335,21 @@ export function GameViewer({
               <div className="rounded-md border border-ink/15 bg-paper/60 px-3 py-2 text-center text-xs text-ink/60 dark:border-paper/20 dark:bg-ink/40 dark:text-paper/60">
                 Waiting for the {toMove} agents to deliberate…
               </div>
+            )}
+            {/* Debug strip — drops when drag is enabled, shows why otherwise. */}
+            {!canDrag && snapshot.status === "ongoing" && (
+              <details className="text-[11px] text-ink/40 dark:text-paper/40">
+                <summary className="cursor-pointer select-none font-mono-block text-[10px] uppercase tracking-[0.14em]">
+                  Why can&rsquo;t I drag?
+                </summary>
+                <ul className="mt-1.5 pl-3 font-mono-block">
+                  <li>playToken: {playToken ? "present" : "missing (open the play URL, not the watch URL)"}</li>
+                  <li>mode: {initial.mode ?? "(not set)"} {isHumanGame ? "✓" : "✗ must be human_vs_ai"}</li>
+                  <li>your side: {humanPlaysSide ?? "(none)"}</li>
+                  <li>side to move: {toMove} {humanTurn ? "✓ your turn" : "✗ not your turn yet"}</li>
+                  <li>legal moves loaded: {initial.legal_moves?.length ?? 0}</li>
+                </ul>
+              </details>
             )}
             <div className="overflow-hidden rounded-xl border border-ink/10 shadow-sm dark:border-paper/10">
               <Chessboard
