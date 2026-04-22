@@ -194,14 +194,21 @@ If \`mode == "human_vs_ai"\` AND \`side_to_move == human_plays\`, the human play
 You do NOT prompt the user in chat. You do NOT parse SAN. You do not touch \`/move\` for this turn. Instead:
 
 1. (Optional) POST a \`TURN_STARTED\` event so the viewer shows "your turn" clearly: \`{"type":"TURN_STARTED","turn":N,"side":"{side}","player":"human"}\`.
-2. Wait for the human to play by polling the snapshot every 3-5 seconds:
-   \`\`\`
-   while True:
+2. Poll for the human's move. **Use a proper sleep + jq parse.** Do NOT write a tight until/grep loop in bash — they get stuck on JSON whitespace. Correct pattern (paste this exactly, substituting vars):
+
+   \`\`\`bash
+   while true; do
      sleep 4
-     snap = GET ${API}/games/{id}
-     if snap.status != "ongoing": break  # game ended
-     if snap.side_to_move != human_plays: break  # they played; FEN advanced
+     SIDE=$(curl -sS ${API}/games/$GAME_ID | jq -r .side_to_move)
+     STATUS=$(curl -sS ${API}/games/$GAME_ID | jq -r .status)
+     echo "poll: side=$SIDE status=$STATUS"
+     [ "$STATUS" != "ongoing" ] && break
+     [ "$SIDE" != "$HUMAN_PLAYS" ] && break
+   done
    \`\`\`
+
+   Each iteration runs two fast curls + two jq parses, prints a line (so you can see the loop is alive), and explicitly breaks on the two exit conditions. If bash isn't available, a single Read tool call with a 4-second sleep between attempts works too — the key is **explicit parse + explicit sleep**, not a compound until.
+
 3. Once the loop exits, continue the outer turn loop. It will now be the AI's turn.
 
 **Do not time out the wait** — the human may take several minutes. The game TTL is 7 days; patience is fine. If you want to be polite, after ~5 minutes of waiting you can print a single reminder: "Still your move, {side}." But do not re-ask for the move in chat.
